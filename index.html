@@ -185,8 +185,6 @@
 <nav class="tabs">
   <button class="on" data-tab="log">記録</button>
   <button data-tab="dist">距離作戦</button>
-  <button data-tab="stats">位置(参考)</button>
-  <button data-tab="strat">位置作戦</button>
   <button data-tab="ev">EV</button>
   <button data-tab="data">データ</button>
 </nav>
@@ -198,15 +196,6 @@
     <button id="undo">↩︎ 取消</button>
     <button id="jumpStats">距離作戦を見る →</button>
   </div>
-</section>
-
-<section id="tab-stats">
-  <div class="note-block" style="margin-bottom:14px">これは<b>絶対位置</b>（どの数字が多いか）の参考ビュー。ホイールは数字順に並んでないので、メインの張り先は<b>距離作戦</b>タブ。ここは「距離が効かない台か？＝物理ポケットの偏りがないか」のクロスチェック用。</div>
-  <div class="cards" id="cards"></div>
-  <h3 class="sec">熱い目 ランキング</h3>
-  <div id="hotTable"></div>
-  <h3 class="sec">セクター熱分布（物理配列順）</h3>
-  <div class="sector" id="sectorBox"></div>
 </section>
 
 <section id="tab-dist">
@@ -221,30 +210,7 @@
   <h3 class="sec">オフセット分布（前の目から時計回り何個先か・平滑後）</h3>
   <div class="sector" id="distHist"></div>
   <div class="note-block" style="margin-top:14px">
-    横軸は「前の目から時計回りに何個先に落ちたか」。着地は物理的にばらつくから、<b>ピーク単体でなくガウス平滑で分散ごと確率場として</b>扱ってる（＝周辺も持ち上がる）。ただし ── これが効くのは<b>連続スピンが機械的に連動してる台だけ</b>。多くの自動機は毎回リセットされ前後の目は独立で、その場合この分布は平らになる。<b>平らなら独立＝この手は捨て、絶対位置の偏り（分析タブ）で戦う。</b>
-  </div>
-</section>
-
-<section id="tab-strat">
-  <div class="field" style="border:0;padding:0 0 12px">
-    <label>ストレートアップ配当<small>この台は 29:1</small></label>
-    <input class="mono" id="inPayout2" type="number" inputmode="decimal" value="29">
-  </div>
-  <div class="note-block" style="margin-bottom:14px">これは<b>絶対位置ベースの参考作戦</b>。毎回モーションが一定な台では、メインの張り先は<b>距離作戦</b>タブ。両方を並走させて、どちらの偏りが本物かデータに判定させる。</div>
-  <div class="verdict v-wait" id="stratVerdict" style="margin:0 0 14px">
-    <div class="vlabel"><span class="dot"></span>今の指示</div>
-    <div class="vmain" id="sMain">データ待ち</div>
-    <div class="vsub" id="sSub"></div>
-  </div>
-  <div class="cards" id="stratCards"></div>
-  <h3 class="sec" style="color:var(--green-bright)">張る目（損益分岐を確信で超えた）</h3>
-  <div id="betList"></div>
-  <h3 class="sec" style="color:var(--neg)">避ける目（冷たいと確信）</h3>
-  <div id="avoidList"></div>
-  <h3 class="sec">様子見（まだ判断できない）</h3>
-  <div id="watchList"></div>
-  <div class="note-block" style="margin-top:16px">
-    <b>低分散の作戦。</b> 「張る目」に均等ベット、「避ける目」は捨てる。カバーする目が多いほど勝率が上がり分散は下がる。ただし<b>損益分岐を超える目しか張らない</b> — 「冷たくないだけ」の平均的な目を足すと、分散は下がっても期待値がマイナスに沈む。<br>もっと攻めたいなら、上の表で特にZが高い目に厚めに乗せる（＝ケリー）。
+    横軸は「前の目から時計回りに何個先に落ちたか」。着地は物理的にばらつくから、ピーク単体でなくガウス平滑で分散ごと確率場として扱い、<b>ピーク±rの窓</b>で束ねてる。<b>GOには2条件：</b>①<b>オフセットχ²検定</b>でこの分布が「偶然の平坦」でないと出る（p&lt;0.05）、②窓の<b>保守EV（信頼下限）がプラス</b>。両方そろうまで賭けない。連続スピンが独立な台ならχ²は有意にならず、分布は平らになる＝その台は捨てる。
   </div>
 </section>
 
@@ -379,17 +345,24 @@
     recentEl.innerHTML=last.map(function(p){ return '<div class="chip c-'+colorOf(p)+'">'+p+'</div>'; }).join("");
   }
 
+  // Highlight the DISTANCE-predicted zone for the next spin (given the last result),
+  // not absolute frequency. Green when the zone is a confirmed GO, amber when tentative.
   function renderPadCounts(a){
-    var be=payoutBreakeven();
+    var s=spins(), o=analyzeOffsets(s), m=N_POCKETS, last=s.length?s[s.length-1]:null;
+    var go = (o.np>=150 && o.p<0.05 && o.best && o.best.evLow>0);
+    var maybe = (o.np>=150 && o.p<0.05 && o.best);
+    var zone={};
+    if(last!=null && o.best && (go||maybe)){
+      var li=IDX[last];
+      for(var j=-o.best.r;j<=o.best.r;j++){ zone[WHEEL_ORDER[(li+((o.peak+j)%m+m)%m)%m]]=1; }
+    }
     padEl.querySelectorAll(".pad").forEach(function(el){
       var p=el.getAttribute("data-p");
       var row=a.rows.find(function(r){return r.p===p;});
       var cntEl=el.querySelector(".cnt");
       cntEl.textContent = row&&row.o? row.o : "";
       el.classList.remove("hot","warm");
-      if(!row||a.n<80) return;
-      if(row.low>be) el.classList.add("hot");
-      else if(row.z>=2) el.classList.add("warm");
+      if(zone[p]) el.classList.add(go?"hot":"warm");
     });
   }
 
@@ -420,7 +393,7 @@
     }
     v.classList.add("v-flat");
     main.textContent="距離は一様 — 前後のスピンは独立";
-    sub.textContent="オフセットχ² p="+fmtP(o.p)+"。"+(o.np<400?"まだペア"+o.np+"。数百まで回せば出るかも。":"距離モデルは効かない台かも。位置(参考)タブで絶対位置の偏りも確認を。");
+    sub.textContent="オフセットχ² p="+fmtP(o.p)+"。"+(o.np<400?"まだペア"+o.np+"。数百まで回せば出るかも。":"距離モデルが効かない台かも。別台も試す価値あり。");
   }
   function fmtP(p){ if(p<0.0001) return "<0.0001"; return p.toFixed(4); }
 
@@ -657,7 +630,7 @@
     }
     v.classList.add("v-flat");
     main.textContent="距離は一様 — 連続スピンは独立";
-    sub.textContent="オフセットχ² p="+fmtP(o.p)+"。前の目と次の目に関係なし＝この攻め方は無理。絶対位置の偏り（分析タブ）に切り替えを。";
+    sub.textContent="オフセットχ² p="+fmtP(o.p)+"。前の目と次の目に関係なし＝この攻め方は無理。別の台を探す方が早い。";
     $("distPred").innerHTML='<div class="empty">距離ベースの予測は無効（前後は独立）</div>';
   }
 
@@ -672,11 +645,7 @@
     renderRecent();
     renderPadCounts(a);
     renderVerdict(a);
-    renderCards(a);
-    renderHotTable(a);
-    renderSector(a);
     renderDist(a);
-    renderStrat(a);
     renderEV(a);
   }
 
@@ -703,10 +672,8 @@
   $("undo").addEventListener("click",undo);
   document.addEventListener("keydown",function(e){ if(e.key==="Backspace"&&e.target.tagName!=="INPUT"){ undo(); } });
 
-  // ---- EV / payout inputs (two payout fields kept in sync) ----
-  $("inPayout").addEventListener("input",function(){ $("inPayout2").value=$("inPayout").value; render(); });
-  $("inPayout2").addEventListener("input",function(){ $("inPayout").value=$("inPayout2").value; render(); });
-  ["inQ","inM"].forEach(function(id){ $(id).addEventListener("input",function(){ render(); }); });
+  // ---- EV / payout / multiplier inputs ----
+  ["inPayout","inQ","inM"].forEach(function(id){ $(id).addEventListener("input",function(){ render(); }); });
 
   // ---- Data ----
   function dl(name,text,type){
