@@ -184,6 +184,7 @@
 
 <nav class="tabs">
   <button class="on" data-tab="log">記録</button>
+  <button data-tab="bet">ベット</button>
   <button data-tab="dist">距離作戦</button>
   <button data-tab="ev">EV</button>
   <button data-tab="data">データ</button>
@@ -194,8 +195,18 @@
   <div class="padwrap" id="pad"></div>
   <div class="logbar">
     <button id="undo">↩︎ 取消</button>
-    <button id="jumpStats">距離作戦を見る →</button>
+    <button id="jumpStats">ベットを見る →</button>
   </div>
+</section>
+
+<section id="tab-bet">
+  <div class="verdict v-wait" id="betVerdict" style="margin:0 0 14px">
+    <div class="vlabel"><span class="dot"></span>次に張る14点</div>
+    <div class="vmain" id="betMain">データ待ち</div>
+    <div class="vsub" id="betSub"></div>
+  </div>
+  <div id="betList"></div>
+  <div class="note-block" style="margin-top:14px">直前の目から距離モデルで選んだ<b>期待値の高い順14点</b>。各行はその数字に$1賭けた時の期待損益（倍率無視・素の29:1）。<b>期待値がプラスの数字</b>が実際に効いてる本命、<b>合計</b>がプラスなら14点まとめて+EV。母数が薄いうちは選択の偶然で高く出るので、実地で「約半分当たるか」も併せて見て。</div>
 </section>
 
 <section id="tab-dist">
@@ -622,6 +633,39 @@
     $("distPred").innerHTML=planPockets();
   }
 
+  // Number-first bet sheet: the 14 pockets to place next, each with its own EV,
+  // and the sum. EV per $1 on a number = p_i * 30 - 1 (net); the total is the sum.
+  function renderBet(a){
+    var s=spins(), o=analyzeOffsets(s), pl=o.plan, last=s.length?s[s.length-1]:null, m=N_POCKETS;
+    var v=$("betVerdict"), main=$("betMain"), sub=$("betSub");
+    v.className="verdict";
+    if(o.np<1 || last==null){
+      v.classList.add("v-wait");
+      main.textContent="まず1回、出た目を記録";
+      sub.textContent="直前の目を基準に、次に張る14点と各数字の期待値を出す。";
+      $("betList").innerHTML='<div class="empty">記録待ち</div>';
+      return;
+    }
+    var li=IDX[last];
+    var rows=pl.picks.map(function(d){
+      var p=WHEEL_ORDER[(li+d)%m];
+      var pi=o.np>0? o.counts[d]/o.np : 0;
+      return {p:p, d:d, pi:pi, ev:pi*pl.flatRet-1};   // net $ per $1 on this number
+    }).sort(function(x,y){ return y.pi-x.pi; });
+
+    var cls = pl.evLow>1? "v-hit" : (pl.ev>1? "v-maybe" : "v-flat");
+    v.classList.add(cls);
+    main.innerHTML="合計期待値 <b class='mono'>"+(pl.profit>=0?"+":"")+pl.profit.toFixed(2)+"</b>（14点$1ずつ・1スピン）"+(pl.profit>0?" ▲勝ち":" ▼負け");
+    sub.textContent="＝ $1あたり "+pl.ev.toFixed(2)+"（>1で勝ち）｜保守EV "+pl.evLow.toFixed(2)+"｜合計的中率 "+(pl.P*100).toFixed(0)+"%（損益分岐≈"+(pl.beP*100).toFixed(0)+"%）｜直前 "+last;
+
+    var h='<table><thead><tr><th>賭ける数字</th><th>距離</th><th>的中率</th><th>期待値/$1</th></tr></thead><tbody>';
+    rows.forEach(function(r){
+      h+='<tr><td>'+badge(r.p)+'</td><td class="num">'+fmtOff(r.d)+'</td><td class="num">'+(r.pi*100).toFixed(1)+'%</td><td class="num '+(r.ev>=0?'ev-pos':'ev-neg')+'">'+(r.ev>=0?'+':'')+r.ev.toFixed(2)+'</td></tr>';
+    });
+    h+='</tbody><tfoot><tr style="border-top:2px solid var(--ink-faint)"><td><b>合計（14点）</b></td><td></td><td class="num">'+(pl.P*100).toFixed(0)+'%</td><td class="num '+(pl.profit>=0?'ev-pos':'ev-neg')+'"><b>'+(pl.profit>=0?'+':'')+pl.profit.toFixed(2)+'</b></td></tr></tfoot></table>';
+    $("betList").innerHTML=h;
+  }
+
   function renderWheelSel(){
     var names=Object.keys(db.wheels);
     wheelSel.innerHTML=names.map(function(nm){ return '<option'+(nm===db.current?' selected':'')+'>'+nm+'</option>'; }).join("");
@@ -633,6 +677,7 @@
     renderRecent();
     renderPadCounts(a);
     renderVerdict(a);
+    renderBet(a);
     renderDist(a);
     renderEV(a);
   }
@@ -646,7 +691,7 @@
       window.scrollTo(0,0);
     });
   });
-  $("jumpStats").addEventListener("click",function(){ document.querySelector('nav.tabs button[data-tab="dist"]').click(); });
+  $("jumpStats").addEventListener("click",function(){ document.querySelector('nav.tabs button[data-tab="bet"]').click(); });
 
   // ---- Wheel management ----
   wheelSel.addEventListener("change",function(){ db.current=wheelSel.value; save(); render(); });
