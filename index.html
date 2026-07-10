@@ -210,7 +210,7 @@
   <h3 class="sec">オフセット分布（前の目から時計回り何個先か・平滑後）</h3>
   <div class="sector" id="distHist"></div>
   <div class="note-block" style="margin-top:14px">
-    横軸は「前の目から時計回りに何個先に落ちたか」。着地は物理的にばらつくから、ピーク単体でなくガウス平滑で分散ごと確率場として扱い、<b>ピーク±rの窓</b>で束ねてる。<b>GOには2条件：</b>①<b>オフセットχ²検定</b>でこの分布が「偶然の平坦」でないと出る（p&lt;0.05）、②窓の<b>保守EV（信頼下限）がプラス</b>。両方そろうまで賭けない。連続スピンが独立な台ならχ²は有意にならず、分布は平らになる＝その台は捨てる。
+    横軸は「前の目から時計回りに何個先に落ちたか」。着地は物理的にばらつくから、ピーク単体でなくガウス平滑で分散ごと確率場として扱い、<b>ピーク±rの窓</b>で束ねてる。<b>いつでも張れる</b> — ゾーンは常に出す。賭け額は<b>データ信頼値</b>で決める：①そのゾーンが本当に+EVか（片側検定）②ピークを38個から選んだ選択バイアスを補正③母数が薄いほど下がる、の合成。信頼値が低いうちはランク稼ぎの<b>最低額で探索</b>、上がるほど<b>厚く</b>。オフセットχ²は分布が「偶然の平坦」でないかの全体検定（p&lt;0.05で構造あり）。ずっと平ら＝前後独立の台なので見切る。
   </div>
 </section>
 
@@ -291,6 +291,15 @@
   }
   function wilsonLow(k,n){ return wilson(k,n).low; }
 
+  // Normal CDF (erf approximation, Abramowitz-Stegun 7.1.26) for the confidence score.
+  function erf(x){
+    var s=x<0?-1:1; x=Math.abs(x);
+    var t=1/(1+0.3275911*x);
+    var y=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-x*x);
+    return s*y;
+  }
+  function ncdf(x){ return 0.5*(1+erf(x/Math.SQRT2)); }
+
   function analyze(){
     var s=spins(), n=s.length;
     var counts={}; WHEEL_ORDER.forEach(function(p){counts[p]=0;});
@@ -349,10 +358,10 @@
   // not absolute frequency. Green when the zone is a confirmed GO, amber when tentative.
   function renderPadCounts(a){
     var s=spins(), o=analyzeOffsets(s), m=N_POCKETS, last=s.length?s[s.length-1]:null;
-    var go = (o.np>=150 && o.p<0.05 && o.best && o.best.evLow>0);
-    var maybe = (o.np>=150 && o.p<0.05 && o.best);
+    var conf = o.best? o.best.conf : 0;
+    var strong = conf>=0.65;
     var zone={};
-    if(last!=null && o.best && (go||maybe)){
+    if(last!=null && o.best && conf>=0.20){
       var li=IDX[last];
       for(var j=-o.best.r;j<=o.best.r;j++){ zone[WHEEL_ORDER[(li+((o.peak+j)%m+m)%m)%m]]=1; }
     }
@@ -362,7 +371,7 @@
       var cntEl=el.querySelector(".cnt");
       cntEl.textContent = row&&row.o? row.o : "";
       el.classList.remove("hot","warm");
-      if(zone[p]) el.classList.add(go?"hot":"warm");
+      if(zone[p]) el.classList.add(strong?"hot":"warm");
     });
   }
 
@@ -371,29 +380,18 @@
     var v=$("verdict"), main=$("vMain"), sub=$("vSub");
     v.className="verdict";
     var s=spins(), o=analyzeOffsets(s), last=s.length?s[s.length-1]:null, m=N_POCKETS;
-    if(o.np<150){
+    var conf = o.best? o.best.conf : 0;
+    if(o.np<10 || !o.best){
       v.classList.add("v-wait");
-      main.textContent="まだ賭けるな — 記録を続けろ（ペア "+o.np+"/150+）";
-      sub.textContent="前回からの距離の偏りを掴むには連続ペアが数百要る。今はひたすらタップ。";
+      main.textContent="まず回して記録（ペア "+o.np+"）";
+      sub.textContent="数回タップすれば、直前の目からの張りゾーンと信頼値を出す。最低額から回してOK。";
       return;
     }
-    if(o.p<0.05 && o.best && o.best.evLow>0){
-      v.classList.add("v-hit");
-      var zone="";
-      if(last!=null){ var li=IDX[last], ps=[]; for(var j=-o.best.r;j<=o.best.r;j++){ ps.push(WHEEL_ORDER[(li+((o.peak+j)%m+m)%m)%m]); } zone=" → "+ps.join(" ");}
-      main.innerHTML="GO — 距離 <b class='mono'>"+o.peak+"±"+o.best.r+"</b> の "+o.best.size+"目"+(last!=null?"（直前 "+last+"）":"");
-      sub.textContent="賭け額あたり +"+o.best.edgeHat.toFixed(1)+"%（保守 +"+o.best.edgeLow.toFixed(1)+"%）/ 勝率 "+o.best.winrate.toFixed(0)+"%。距離作戦タブへ。"+zone;
-      return;
-    }
-    if(o.p<0.05){
-      v.classList.add("v-maybe");
-      main.innerHTML="距離に偏りの兆候 → ピーク <b class='mono'>"+o.peak+"個先</b>";
-      sub.textContent="オフセットχ² p="+fmtP(o.p)+"。構造はありそうだが、保守EVがまだプラス未達。記録を増やして確定を。";
-      return;
-    }
-    v.classList.add("v-flat");
-    main.textContent="距離は一様 — 前後のスピンは独立";
-    sub.textContent="オフセットχ² p="+fmtP(o.p)+"。"+(o.np<400?"まだペア"+o.np+"。数百まで回せば出るかも。":"距離モデルが効かない台かも。別台も試す価値あり。");
+    var band=confBand(conf), zone="";
+    if(last!=null){ var li=IDX[last], ps=[]; for(var j=-o.best.r;j<=o.best.r;j++){ ps.push(WHEEL_ORDER[(li+((o.peak+j)%m+m)%m)%m]); } zone=" → "+ps.join(" ");}
+    v.classList.add(band.cls);
+    main.innerHTML="信頼値 <b class='mono'>"+(conf*100).toFixed(0)+"%</b> / 距離 <b class='mono'>"+o.peak+"±"+o.best.r+"</b> の "+o.best.size+"目"+(last!=null?"（直前 "+last+"）":"");
+    sub.textContent="推奨 "+band.size+"。EV "+(o.best.edgeHat>=0?"+":"")+o.best.edgeHat.toFixed(1)+"%（保守 "+(o.best.edgeLow>=0?"+":"")+o.best.edgeLow.toFixed(1)+"%）/ 勝率 "+o.best.winrate.toFixed(0)+"% / χ² p="+fmtP(o.p)+"。"+zone;
   }
   function fmtP(p){ if(p<0.0001) return "<0.0001"; return p.toFixed(4); }
 
@@ -565,30 +563,52 @@
       var K=0, size=2*r+1;
       for(var j=-r;j<=r;j++){ K+=counts[((peak+j)%m+m)%m]; }
       var wl=wilson(K,np);
-      var cand={ r:r, size:size, K:K,
-        pHat: np>0?K/np:0, pLow: wl.low,
-        perHat: np>0?(K/np)/size:0, perLow: wl.low/size,
-        evHat: np>0?(K/np)*W-size:0, evLow: np>0?wl.low*W-size:0,
-        edgeHat: np>0?((K/np)*W-size)/size*100:0, edgeLow: np>0?(wl.low*W-size)/size*100:0,
-        winrate: np>0?(K/np)*100:0 };
+      var pHat= np>0?K/np:0, beAgg=size*be;
+      // confidence this zone is genuinely +EV, honest about thin data:
+      //   z-test that per-pocket rate beats break-even, penalised for having
+      //   cherry-picked the peak from ~m offsets, then scaled down by sample size.
+      var SE = np>0? Math.sqrt(Math.max(pHat*(1-pHat),1e-9)/np) : 1;
+      var z = (pHat-beAgg)/SE;
+      var pOne = 1-ncdf(z);
+      // the peak was cherry-picked from ~m offset positions → penalise selection
+      var Meff = m;
+      var sigRaw = Math.pow(Math.max(0,Math.min(1,1-pOne)), Meff);
+      var dataF = np/(np+80);
+      var conf = np>=5? sigRaw*dataF : 0;
+      var cand={ r:r, size:size, K:K, z:z, conf:conf,
+        pHat: pHat, pLow: wl.low,
+        perHat: np>0?pHat/size:0, perLow: wl.low/size,
+        evHat: np>0?pHat*W-size:0, evLow: np>0?wl.low*W-size:0,
+        edgeHat: np>0?(pHat*W-size)/size*100:0, edgeLow: np>0?(wl.low*W-size)/size*100:0,
+        winrate: np>0?pHat*100:0 };
       if(best===null || cand.evLow>best.evLow) best=cand;
     }
     return {np:np,counts:counts,sm:sm,E:E,chi2:chi2,p:p,peak:peak,W:W,be:be,best:best};
   }
 
+  // Confidence → recommended bet size. Always actionable; size scales with trust.
+  function confBand(c){
+    if(c>=0.85) return {cls:"v-hit",  size:"本張り（フル）"};
+    if(c>=0.65) return {cls:"v-hit",  size:"中ベット"};
+    if(c>=0.40) return {cls:"v-maybe",size:"小ベット"};
+    if(c>=0.20) return {cls:"v-maybe",size:"最低額で探索"};
+    return             {cls:"v-wait", size:"最低額のみ（ほぼ勘）"};
+  }
+
   function renderDist(a){
     var s=spins();
     var o=analyzeOffsets(s);
-    var be=o.be, last = s.length? s[s.length-1] : null;
+    var be=o.be, last = s.length? s[s.length-1] : null, m=N_POCKETS;
+    var conf = o.best? o.best.conf : 0;
 
     $("distCards").innerHTML=
-      card("連続ペア数", o.np, o.np>=400?"十分な母数":(o.np>=150?"あと少し":"母数不足"))+
-      card("オフセットχ²", o.np?o.chi2.toFixed(1):"—", "df=37 / p="+(o.np?fmtP(o.p):"—"))+
-      card("損益分岐/目", (be*100).toFixed(2)+"%", "倍率込み・実効"+o.W.toFixed(1)+"倍")+
+      card("データ信頼値", (conf*100).toFixed(0)+"%", "母数と信号で変動")+
+      card("連続ペア数", o.np, o.np>=400?"十分な母数":(o.np>=150?"そこそこ":"探索段階"))+
+      card("オフセットχ²", o.np?o.chi2.toFixed(1):"—", "p="+(o.np?fmtP(o.p):"—"))+
       card("狙う窓EV", (o.np&&o.best?(o.best.edgeHat>=0?"+":"")+o.best.edgeHat.toFixed(1):"—")+"%", o.np&&o.best?"保守 "+(o.best.edgeLow>=0?"+":"")+o.best.edgeLow.toFixed(1)+"%":"—");
 
     // smoothed histogram with the chosen window highlighted
-    var m=N_POCKETS, maxc=Math.max.apply(null,o.sm.concat([0.001]));
+    var maxc=Math.max.apply(null,o.sm.concat([0.001]));
     var inWin={}; if(o.best){ for(var j=-o.best.r;j<=o.best.r;j++){ inWin[((o.peak+j)%m+m)%m]=1; } }
     var strip='<div class="wheelstrip">';
     for(var d=0; d<m; d++){
@@ -598,40 +618,28 @@
     strip+='</div>';
     $("distHist").innerHTML=strip;
 
-    var v=$("distVerdict"), main=$("dMain"), sub=$("dSub");
-    v.className="verdict";
-    if(o.np<150){
-      v.classList.add("v-wait");
-      main.textContent="まだ判断できない（ペア "+o.np+"/150+）";
-      sub.textContent="『前の目からの距離』に偏りがあるか見るには連続ペアが数百要る。記録を続けて。";
-      $("distPred").innerHTML='<div class="empty">データ待ち</div>';
-      return;
-    }
     var winOffs=[]; if(o.best){ for(var j2=-o.best.r;j2<=o.best.r;j2++){ winOffs.push(((o.peak+j2)%m+m)%m); } }
     function zonePockets(){
-      if(last==null) return '';
+      if(last==null || !o.best) return '<div class="empty">1回記録すると、直前の目からゾーンを出す</div>';
       var li=IDX[last];
       var chips=winOffs.map(function(d){ var p=WHEEL_ORDER[(li+d)%m]; return '<div class="chip c-'+colorOf(p)+'" title="'+d+'個先">'+p+'</div>'; }).join("");
       return '<div class="note-block" style="margin-bottom:10px">直前の目 <b class="mono">'+last+'</b> を基準に、距離 <b class="mono">'+o.peak+'±'+o.best.r+'</b> の窓＝<b>次に張るゾーン</b>（'+o.best.size+'目・分散込み）：</div><div class="recent" style="flex-wrap:wrap;overflow:visible">'+chips+'</div>';
     }
-    if(o.p<0.05 && o.best && o.best.evLow>0){
-      v.classList.add("v-hit");
-      main.innerHTML="GO — 距離 <b class='mono'>"+o.peak+"±"+o.best.r+"</b> の "+o.best.size+"目 / 勝率 "+o.best.winrate.toFixed(0)+"%";
-      sub.textContent="賭け額あたり +"+o.best.edgeHat.toFixed(1)+"%（保守側でも +"+o.best.edgeLow.toFixed(1)+"%）。オフセットχ² p="+fmtP(o.p)+"。前の目からこの距離帯へ均等ベット。";
+
+    var v=$("distVerdict"), main=$("dMain"), sub=$("dSub");
+    v.className="verdict";
+    if(o.np<10 || !o.best){
+      v.classList.add("v-wait");
+      main.textContent="まず回して記録（ペア "+o.np+"）";
+      sub.textContent="数回タップすれば、直前の目からの張りゾーンと信頼値を出す。ランク稼ぎの最低額から。";
       $("distPred").innerHTML=zonePockets();
       return;
     }
-    if(o.p<0.05){
-      v.classList.add("v-maybe");
-      main.innerHTML="距離に偏りの兆候 → ピーク <b class='mono'>"+o.peak+"個先</b>";
-      sub.textContent="オフセットχ² p="+fmtP(o.p)+" で構造はありそう。でも保守EVがまだプラスに届かない（点推定 "+(o.best?o.best.edgeHat.toFixed(1):"—")+"%）。記録を増やして確定を。";
-      $("distPred").innerHTML=zonePockets();
-      return;
-    }
-    v.classList.add("v-flat");
-    main.textContent="距離は一様 — 連続スピンは独立";
-    sub.textContent="オフセットχ² p="+fmtP(o.p)+"。前の目と次の目に関係なし＝この攻め方は無理。別の台を探す方が早い。";
-    $("distPred").innerHTML='<div class="empty">距離ベースの予測は無効（前後は独立）</div>';
+    var band=confBand(conf);
+    v.classList.add(band.cls);
+    main.innerHTML="張るゾーン 距離 <b class='mono'>"+o.peak+"±"+o.best.r+"</b>（"+o.best.size+"目） / 信頼値 <b class='mono'>"+(conf*100).toFixed(0)+"%</b>";
+    sub.textContent="推奨: "+band.size+"。点推定EV "+(o.best.edgeHat>=0?"+":"")+o.best.edgeHat.toFixed(1)+"% / 保守 "+(o.best.edgeLow>=0?"+":"")+o.best.edgeLow.toFixed(1)+"% / 勝率 "+o.best.winrate.toFixed(0)+"% / χ² p="+fmtP(o.p)+"。信頼値が上がるほど厚く張る。";
+    $("distPred").innerHTML=zonePockets();
   }
 
   function renderWheelSel(){
