@@ -185,6 +185,7 @@
 <nav class="tabs">
   <button class="on" data-tab="log">記録</button>
   <button data-tab="bet">ベット</button>
+  <button data-tab="out">アウト</button>
   <button data-tab="dist">距離作戦</button>
   <button data-tab="ev">EV</button>
   <button data-tab="data">データ</button>
@@ -211,6 +212,16 @@
   </div>
   <div id="betList"></div>
   <div class="note-block" style="margin-top:14px">直前の目から距離モデルで、<b>EV/$1 が上の閾値を超えた数字だけ</b>を表示（薄い＋や穴は張らない＝分散対策）。各行はその数字に$1賭けた時の期待損益（倍率無視・素の29:1、的中率×30−1）。<b>本命</b>タグ＝Wilson下限も0超えで統計的に確定。<b>点推定の合計は良い数字だけ拾うので必ず＋に見える</b> — 信じるのは<b>保守EVが＋</b>と、実地で本当に当たるか。閾値を上げるほど数字は減り、当たりの振れ（分散）も抑えられる。</div>
+</section>
+
+<section id="tab-out">
+  <div class="verdict v-wait" id="outVerdict" style="margin:0 0 14px">
+    <div class="vlabel"><span class="dot"></span>アウトサイド（低分散）</div>
+    <div class="vmain" id="outMain">データ待ち</div>
+    <div class="vsub" id="outSub"></div>
+  </div>
+  <div id="outList"></div>
+  <div class="note-block" style="margin-top:14px">直前の目を基準に、距離モデルの予測を<b>赤黒・偶奇・ハイロー・Dozen・列</b>へ合算したEV。1:1は的中率50%超え、2:1(Dozen/列)は33.3%超えで+EV（RTP&gt;100%）。<b>アウトサイドは当たる頻度が高い＝低分散</b>だが、同じ偏りならストレートアップ(29:1)の方がEVは高い ── 分散を取るか期待値を取るかの選択。<b>保守EV&gt;0＝本命</b>、点推定だけ＋は実地確認を。</div>
 </section>
 
 <section id="tab-dist">
@@ -265,6 +276,22 @@
   // Signed circular offset: clockwise +1..+19, counter-clockwise -1..-18 (0=same pocket)
   function signOff(d){ d=((d%N_POCKETS)+N_POCKETS)%N_POCKETS; return d<=19? d : d-N_POCKETS; }
   function fmtOff(d){ var s=signOff(d); return (s>0?"+":"")+s; }
+  // Outside bets (American): even-money pay 1:1, dozens/columns pay 2:1. 0/00 fail all.
+  function isNum(p){ return p!=="0" && p!=="00"; }
+  var GROUPS=[
+    {name:"赤 Red",       pay:1, test:function(p){return colorOf(p)==="red";}},
+    {name:"黒 Black",     pay:1, test:function(p){return colorOf(p)==="black";}},
+    {name:"偶数 Even",    pay:1, test:function(p){return isNum(p)&&(+p)%2===0;}},
+    {name:"奇数 Odd",     pay:1, test:function(p){return isNum(p)&&(+p)%2===1;}},
+    {name:"1-18 Low",     pay:1, test:function(p){return isNum(p)&&+p<=18;}},
+    {name:"19-36 High",   pay:1, test:function(p){return isNum(p)&&+p>=19;}},
+    {name:"1st12 (1-12)", pay:2, test:function(p){return isNum(p)&&+p<=12;}},
+    {name:"2nd12 (13-24)",pay:2, test:function(p){return isNum(p)&&+p>=13&&+p<=24;}},
+    {name:"3rd12 (25-36)",pay:2, test:function(p){return isNum(p)&&+p>=25;}},
+    {name:"1列 Col1",     pay:2, test:function(p){return isNum(p)&&(+p)%3===1;}},
+    {name:"2列 Col2",     pay:2, test:function(p){return isNum(p)&&(+p)%3===2;}},
+    {name:"3列 Col3",     pay:2, test:function(p){return isNum(p)&&(+p)%3===0;}}
+  ];
 
   // ---- Storage ----
   var LS="wheelhunter.v1";
@@ -696,6 +723,50 @@
     $("betList").innerHTML=h;
   }
 
+  // Outside-bet EV from the distance prediction (conditional on the last result).
+  function renderOut(a){
+    var s=spins(), o=analyzeOffsets(s), last=s.length?s[s.length-1]:null, m=N_POCKETS, np=o.np;
+    var v=$("outVerdict"), main=$("outMain"), sub=$("outSub");
+    v.className="verdict";
+    if(np<10 || last==null){
+      v.classList.add("v-wait");
+      main.textContent="まだ判断できない（ペア "+np+"）";
+      sub.textContent="直前の目を基準に、赤黒・列・Dozen等の合計EVを出す。記録を続けて。";
+      $("outList").innerHTML='<div class="empty">データ待ち</div>';
+      return;
+    }
+    var li=IDX[last];
+    // predicted prob per pocket given last = offset prob; aggregate per group
+    var rows=GROUPS.map(function(g){
+      var K=0;
+      for(var d=0; d<m; d++){ if(g.test(WHEEL_ORDER[(li+d)%m])) K+=o.counts[d]; }
+      var P=np>0?K/np:0, wl=wilson(K,np), ret=g.pay+1;
+      return {name:g.name, pay:g.pay, P:P, ev:ret*P-1, evLow:ret*wl.low-1, be:1/ret};
+    }).sort(function(x,y){ return y.ev-x.ev; });
+
+    var conf=rows.filter(function(r){return r.evLow>0;});
+    var pt=rows.filter(function(r){return r.ev>0;});
+    var cls = conf.length? "v-hit" : (pt.length? "v-maybe" : "v-flat");
+    v.classList.add(cls);
+    if(conf.length){
+      main.innerHTML="本命アウトサイド <b class='mono'>"+conf.length+"</b>個｜最良 <b>"+conf[0].name+"</b> EV "+(conf[0].ev>=0?"+":"")+conf[0].ev.toFixed(2);
+      sub.textContent="保守EVも0超え＝本物。低分散で+EVを回収できる。直前 "+last;
+    } else if(pt.length){
+      main.innerHTML="点推定+ <b class='mono'>"+pt.length+"</b>個（保守は未達）｜最良 <b>"+pt[0].name+"</b>";
+      sub.textContent="RTP>100%に見えるが確証不足。小額で実地確認を。直前 "+last;
+    } else {
+      main.innerHTML="100%超えのアウトサイドなし";
+      sub.textContent="どの外側ベットも損益分岐未満。素直にストレートアップ(ベットタブ)へ。直前 "+last;
+    }
+
+    var h='<table><thead><tr><th>ベット</th><th>配当</th><th>的中率</th><th>EV/$1</th><th>保守</th></tr></thead><tbody>';
+    rows.forEach(function(r){
+      h+='<tr><td>'+r.name+(r.evLow>0?' <span class="tag edge">本命</span>':'')+'</td><td class="num">'+r.pay+':1</td><td class="num">'+(r.P*100).toFixed(1)+'%</td><td class="num '+(r.ev>=0?'ev-pos':'ev-neg')+'">'+(r.ev>=0?'+':'')+r.ev.toFixed(2)+'</td><td class="num '+(r.evLow>=0?'ev-pos':'ev-neg')+'">'+(r.evLow>=0?'+':'')+r.evLow.toFixed(2)+'</td></tr>';
+    });
+    h+='</tbody></table>';
+    $("outList").innerHTML=h;
+  }
+
   function renderWheelSel(){
     var names=Object.keys(db.wheels);
     wheelSel.innerHTML=names.map(function(nm){ return '<option'+(nm===db.current?' selected':'')+'>'+nm+'</option>'; }).join("");
@@ -708,6 +779,7 @@
     renderPadCounts(a);
     renderVerdict(a);
     renderBet(a);
+    renderOut(a);
     renderDist(a);
     renderEV(a);
   }
