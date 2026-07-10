@@ -177,16 +177,16 @@
 </header>
 
 <div class="verdict v-wait" id="verdict">
-  <div class="vlabel"><span class="dot"></span>判定</div>
+  <div class="vlabel"><span class="dot"></span>距離判定（メイン）</div>
   <div class="vmain" id="vMain">データ待ち</div>
   <div class="vsub" id="vSub">出目を記録すると、偏りを統計判定するよ。</div>
 </div>
 
 <nav class="tabs">
   <button class="on" data-tab="log">記録</button>
-  <button data-tab="stats">分析</button>
-  <button data-tab="dist">距離</button>
-  <button data-tab="strat">作戦</button>
+  <button data-tab="dist">距離作戦</button>
+  <button data-tab="stats">位置(参考)</button>
+  <button data-tab="strat">位置作戦</button>
   <button data-tab="ev">EV</button>
   <button data-tab="data">データ</button>
 </nav>
@@ -196,11 +196,12 @@
   <div class="padwrap" id="pad"></div>
   <div class="logbar">
     <button id="undo">↩︎ 取消</button>
-    <button id="jumpStats">分析を見る →</button>
+    <button id="jumpStats">距離作戦を見る →</button>
   </div>
 </section>
 
 <section id="tab-stats">
+  <div class="note-block" style="margin-bottom:14px">これは<b>絶対位置</b>（どの数字が多いか）の参考ビュー。ホイールは数字順に並んでないので、メインの張り先は<b>距離作戦</b>タブ。ここは「距離が効かない台か？＝物理ポケットの偏りがないか」のクロスチェック用。</div>
   <div class="cards" id="cards"></div>
   <h3 class="sec">熱い目 ランキング</h3>
   <div id="hotTable"></div>
@@ -226,9 +227,10 @@
 
 <section id="tab-strat">
   <div class="field" style="border:0;padding:0 0 12px">
-    <label>ストレートアップ配当<small>この台の1点張り配当。まず現場で確認</small></label>
-    <input class="mono" id="inPayout2" type="number" inputmode="decimal" value="35">
+    <label>ストレートアップ配当<small>この台は 29:1</small></label>
+    <input class="mono" id="inPayout2" type="number" inputmode="decimal" value="29">
   </div>
+  <div class="note-block" style="margin-bottom:14px">これは<b>絶対位置ベースの参考作戦</b>。毎回モーションが一定な台では、メインの張り先は<b>距離作戦</b>タブ。両方を並走させて、どちらの偏りが本物かデータに判定させる。</div>
   <div class="verdict v-wait" id="stratVerdict" style="margin:0 0 14px">
     <div class="vlabel"><span class="dot"></span>今の指示</div>
     <div class="vmain" id="sMain">データ待ち</div>
@@ -251,16 +253,16 @@
     一番熱い目 <b id="evNum">—</b> の実測的中率をもとに期待値を計算。配当と倍率の条件を現場に合わせて調整して。
   </div>
   <div class="field">
-    <label>ストレートアップ配当<small>通常35。Lightning系は29〜30に下がってることが多い</small></label>
-    <input class="mono" id="inPayout" type="number" inputmode="decimal" value="35">
+    <label>ストレートアップ配当<small>この台は 29:1</small></label>
+    <input class="mono" id="inPayout" type="number" inputmode="decimal" value="29">
   </div>
   <div class="field">
-    <label>その目に倍率が乗る確率<small>1回転あたり。倍率機能OFFなら0</small></label>
-    <input class="mono" id="inQ" type="number" inputmode="decimal" value="0" step="0.01">
+    <label>自分の目が光る確率<small>1回転で対象になる割合。写真だと約8個/38≈0.21</small></label>
+    <input class="mono" id="inQ" type="number" inputmode="decimal" value="0.21" step="0.01">
   </div>
   <div class="field">
-    <label>平均倍率<small>乗ったときの配当倍率（例:100〜500）</small></label>
-    <input class="mono" id="inM" type="number" inputmode="decimal" value="100">
+    <label>平均倍率<small>光った時の平均（40〜200xを観測して平均を入れる）</small></label>
+    <input class="mono" id="inM" type="number" inputmode="decimal" value="60">
   </div>
   <div class="evout" id="evOut"></div>
 </section>
@@ -363,8 +365,13 @@
   }
   function undo(){ var s=db.wheels[db.current]; if(s.length){ s.pop(); save(); render(); } }
 
-  function payoutVal(){ return parseFloat($("inPayout").value)||35; }
-  function payoutBreakeven(){ return 1/(payoutVal()+1); }
+  function payoutVal(){ return parseFloat($("inPayout").value)||29; }
+  function multQ(){ return Math.min(1,Math.max(0,parseFloat($("inQ").value)||0)); }
+  function multM(){ return parseFloat($("inM").value)||0; }
+  // Effective average return-multiple on a win, folding in the random multiplier:
+  // most wins pay base (X+1); a fraction q pay the multiplier (M+1) instead.
+  function effWinReturn(){ var X=payoutVal(), q=multQ(), M=multM(); return (1-q)*(X+1) + q*(M+1); }
+  function payoutBreakeven(){ return 1/effWinReturn(); }
 
   function renderRecent(){
     var s=spins(); var last=s.slice(-24).reverse();
@@ -386,34 +393,34 @@
     });
   }
 
+  // Top banner reflects the PRIMARY (distance) model.
   function renderVerdict(a){
     var v=$("verdict"), main=$("vMain"), sub=$("vSub");
     v.className="verdict";
-    var be=payoutBreakeven();
-    var edges=a.rows.filter(function(r){return r.low>be;}).sort(function(x,y){return y.low-x.low;});
-    var watch=a.rows.filter(function(r){return r.z>=2.5 && r.low<=be;}).sort(function(x,y){return y.z-x.z;});
-    if(a.n<80){
+    var s=spins(), o=analyzeOffsets(s), last=s.length?s[s.length-1]:null, m=N_POCKETS;
+    if(o.np<150){
       v.classList.add("v-wait");
-      main.textContent="データ不足 — あと"+(80-a.n)+"スピン記録して";
-      sub.textContent="80スピン超えるまでは何を見てもノイズ。信頼できる判定には数百〜千が理想。";
+      main.textContent="まだ賭けるな — 記録を続けろ（ペア "+o.np+"/150+）";
+      sub.textContent="前回からの距離の偏りを掴むには連続ペアが数百要る。今はひたすらタップ。";
       return;
     }
-    if(edges.length){
+    if(o.p<0.05 && o.best && o.best.evLow>0){
       v.classList.add("v-hit");
-      var e=edges[0];
-      main.innerHTML="利益が出る偏りを検出 → <b class='mono'>"+e.p+"</b>";
-      sub.textContent="実測 "+(e.ph*100).toFixed(2)+"% / 信頼下限 "+(e.low*100).toFixed(2)+"% > 損益分岐 "+(be*100).toFixed(2)+"%。χ²検定 p="+fmtP(a.p)+"。分析タブで確認を。";
+      var zone="";
+      if(last!=null){ var li=IDX[last], ps=[]; for(var j=-o.best.r;j<=o.best.r;j++){ ps.push(WHEEL_ORDER[(li+((o.peak+j)%m+m)%m)%m]); } zone=" → "+ps.join(" ");}
+      main.innerHTML="GO — 距離 <b class='mono'>"+o.peak+"±"+o.best.r+"</b> の "+o.best.size+"目"+(last!=null?"（直前 "+last+"）":"");
+      sub.textContent="賭け額あたり +"+o.best.edgeHat.toFixed(1)+"%（保守 +"+o.best.edgeLow.toFixed(1)+"%）/ 勝率 "+o.best.winrate.toFixed(0)+"%。距離作戦タブへ。"+zone;
       return;
     }
-    if(a.p<0.05){
+    if(o.p<0.05){
       v.classList.add("v-maybe");
-      main.textContent="ホイールは非一様の兆候あり";
-      sub.textContent="χ²検定 p="+fmtP(a.p)+"（<0.05）。ただし『賭けて利益が出る』水準の目はまだ無い。"+(watch.length?("監視中: "+watch.slice(0,3).map(function(r){return r.p;}).join(", ")):"記録を増やして。");
+      main.innerHTML="距離に偏りの兆候 → ピーク <b class='mono'>"+o.peak+"個先</b>";
+      sub.textContent="オフセットχ² p="+fmtP(o.p)+"。構造はありそうだが、保守EVがまだプラス未達。記録を増やして確定を。";
       return;
     }
     v.classList.add("v-flat");
-    main.textContent="今のところ一様 — 偏りの証拠なし";
-    sub.textContent="χ²検定 p="+fmtP(a.p)+"。"+(a.n<400?"まだ"+a.n+"スピン。数百まで回せば埋もれた偏りが出るかも。":"この台は素直かも。別台も試す価値あり。");
+    main.textContent="距離は一様 — 前後のスピンは独立";
+    sub.textContent="オフセットχ² p="+fmtP(o.p)+"。"+(o.np<400?"まだペア"+o.np+"。数百まで回せば出るかも。":"距離モデルは効かない台かも。位置(参考)タブで絶対位置の偏りも確認を。");
   }
   function fmtP(p){ if(p<0.0001) return "<0.0001"; return p.toFixed(4); }
 
@@ -440,7 +447,7 @@
       var edge=r.low>be, watch=!edge&&r.z>=2;
       h+='<tr><td>'+badge(r.p)+'</td><td class="num">'+r.o+'</td><td class="num '+(r.ph>be?'ev-pos':'ev-neg')+'">'+(r.ph*100).toFixed(2)+'</td><td class="num">'+(r.z>=0?'+':'')+r.z.toFixed(1)+'</td><td class="num '+(edge?'ev-pos':'ev-neg')+'">'+(r.low*100).toFixed(2)+'</td><td>'+(edge?'<span class="tag edge">EDGE</span>':(watch?'<span class="tag watch">監視</span>':''))+'</td></tr>';
     });
-    h+='</tbody></table><div class="card" style="margin-top:12px"><div class="note">損益分岐 = '+(be*100).toFixed(2)+'%（配当'+((parseFloat($("inPayout").value)||35))+':1）。<b class="mono" style="color:var(--ink)">信頼下限%</b> がこれを超えた目だけが、実際に賭けて勝てる。Zは期待からの標準偏差。</div></div>';
+    h+='</tbody></table><div class="card" style="margin-top:12px"><div class="note">損益分岐 = '+(be*100).toFixed(2)+'%（配当'+payoutVal()+':1・倍率込み実効'+effWinReturn().toFixed(1)+'倍）。<b class="mono" style="color:var(--ink)">信頼下限%</b> がこれを超えた目だけが、実際に賭けて勝てる。Zは期待からの標準偏差。</div></div>';
     $("hotTable").innerHTML=h;
   }
 
@@ -476,7 +483,7 @@
   }
 
   function renderStrat(a){
-    var X=payoutVal(), be=1/(X+1);
+    var X=payoutVal(), W=effWinReturn(), be=payoutBreakeven();
     var bet=[], avoid=[], watch=[];
     a.rows.forEach(function(r){
       if(a.n<40){ watch.push(r); return; }
@@ -491,8 +498,8 @@
     var k=bet.length;
     var P=bet.reduce(function(s,r){return s+r.ph;},0);        // point estimate hit prob
     var Plow=bet.reduce(function(s,r){return s+r.low;},0);    // conservative
-    var evSpin=k>0? P*(X+1)-k : 0;                            // net units per spin (stake k units)
-    var evSpinLow=k>0? Plow*(X+1)-k : 0;
+    var evSpin=k>0? P*W-k : 0;                                // net units per spin (stake k units)
+    var evSpinLow=k>0? Plow*W-k : 0;
     var edgePct=k>0? evSpin/k*100 : 0;                        // per unit wagered
     var edgeLowPct=k>0? evSpinLow/k*100 : 0;
     var winrate=P*100;
@@ -533,32 +540,34 @@
   }
 
   function renderEV(a){
-    var be=payoutBreakeven();
-    var ranked=a.rows.slice().sort(function(x,y){return y.o-x.o;});
-    var top=ranked[0];
-    $("evNum").textContent = top&&top.o? top.p+"（実測 "+(top.ph*100).toFixed(2)+"%）" : "—（データ待ち）";
-    var X=parseFloat($("inPayout").value)||0;
-    var q=Math.min(1,Math.max(0,parseFloat($("inQ").value)||0));
-    var M=parseFloat($("inM").value)||0;
-    var ph = top&&top.o? top.ph : 0;
-    // win return per unit: base payout normally, multiplier payout when struck
-    var winRet = (1-q)*(X+1) + q*(M+1);
-    var ev = ph*winRet - 1;
-    var evBase = ph*(X+1) - 1;
-    var breakevenPh = winRet>0? 1/winRet : 1;
+    var s=spins(), o=analyzeOffsets(s);
+    var X=payoutVal(), W=effWinReturn();
+    var beBase=1/(X+1), beMult=1/W;
+    var perHat = (o.np&&o.best)? o.best.perHat : 0;   // per-pocket hit prob inside the distance zone
+    var perLow = (o.np&&o.best)? o.best.perLow : 0;
+    var rtp = perHat*W*100, ev = perHat*W - 1;
+    $("evNum").textContent = o.np&&o.best? ("距離ゾーン "+o.peak+"±"+o.best.r+"（1目平均 "+(perHat*100).toFixed(2)+"%）") : "—（データ待ち）";
+    function line(l,val){ return '<div class="evline"><span>'+l+'</span><b>'+val+'</b></div>'; }
     var cls = ev>0?"pos":"neg";
     $("evOut").innerHTML=
-      '<div class="k" style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:600">1ドルあたり期待値</div>'+
-      '<div class="evbig '+cls+'">'+(ev>=0?"+":"")+(ev*100).toFixed(1)+'%</div>'+
-      '<div class="evline"><span>倍率なしの素の期待値</span><b>'+(evBase>=0?"+":"")+(evBase*100).toFixed(1)+'%</b></div>'+
-      '<div class="evline"><span>この目の実測的中率</span><b>'+(ph*100).toFixed(2)+'%</b></div>'+
-      '<div class="evline"><span>損益分岐に必要な的中率</span><b>'+(breakevenPh*100).toFixed(2)+'%</b></div>'+
-      '<div class="note-block" style="margin-top:14px">'+(a.n<200?'<b>まだ母数が少ない（'+a.n+'）。</b>この的中率は当てにならない。数百スピン貯めてから判断を。':(ev>0?'<b>理論上プラス。</b>ただし信頼下限（分析タブ）が損益分岐を超えているか必ず確認してから賭けること。':'<b>まだマイナス。</b>この目の的中率が損益分岐を超えないと勝てない。'))+'</div>';
+      '<div class="k" style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:600">期待値（RTP・倍率込み）</div>'+
+      '<div class="evbig '+cls+'">'+(o.np?rtp.toFixed(0):"—")+'%</div>'+
+      line("＝ 1ドルあたり損益", o.np?((ev>=0?"+":"")+(ev*100).toFixed(1)+"%"):"—")+
+      line("実効ペイアウト（当たり1回の平均戻り）", W.toFixed(1)+"倍")+
+      line("損益分岐 的中率（倍率込み）", (beMult*100).toFixed(2)+"%")+
+      line("損益分岐 的中率（29:1のみ）", (beBase*100).toFixed(2)+"%")+
+      line("距離ゾーン1目の実測的中率", o.np?(perHat*100).toFixed(2)+"%（保守 "+(perLow*100).toFixed(2)+"%）":"—")+
+      '<div class="note-block" style="margin-top:14px">'+
+        '倍率が実効ペイアウトを <b>'+W.toFixed(1)+'倍</b> に押し上げるから、損益分岐は <b>29:1単体の '+(beBase*100).toFixed(2)+'%</b> ではなく <b>'+(beMult*100).toFixed(2)+'%</b>。的中率がこれを超えれば RTP>100%。'+
+        (o.np<200?'<br><b>ただし母数がまだ少ない（ペア'+o.np+'）。</b>数百貯めるまで信用しない。':(ev>0?'<br><b>今の推定ではプラス。</b>ただしEVの一部は稀な高倍率頼み＝高分散。距離作戦タブの保守EVで最終判断を。':'<br><b>まだ100%未満。</b>ゾーンの的中率が損益分岐を超える必要がある。'))+
+      '</div>';
   }
 
-  // ---- Offset (distance-from-previous) analysis ----
-  // Circular Gaussian kernel over offsets so a hot distance lifts its neighbours too
-  // (physical landing has spread → model the whole probability field, not one bin).
+  // ---- Offset (distance-from-previous) analysis + distance-based strategy ----
+  // Everything here is computed on the wheel-distance from the PREVIOUS result,
+  // not on absolute pocket position. Landing has spread, so we don't bet a single
+  // offset — we bet a window (peak ± r) and let a Wilson bound on the whole window
+  // decide, folding the multiplier into break-even.
   function analyzeOffsets(s){
     var m=N_POCKETS;
     var counts=new Array(m); for(var d=0;d<m;d++) counts[d]=0;
@@ -571,46 +580,53 @@
     var E=np/m, chi2=0;
     if(np>0){ for(var d2=0;d2<m;d2++){ chi2+=Math.pow(counts[d2]-E,2)/E; } }
     var p=np>0? chiP(chi2,m-1) : 1;
-    // gaussian kernel, sigma=1, radius 3
-    var sigma=1.0, R=3, w=[];
-    for(var k=-R;k<=R;k++) w.push(Math.exp(-k*k/(2*sigma*sigma)));
-    var sw=0,sw2=0; w.forEach(function(x){sw+=x;sw2+=x*x;});
+    // gaussian-smoothed field (for peak finding + display); models the spread
+    var sigma=1.0,R=3,w=[]; for(var k=-R;k<=R;k++) w.push(Math.exp(-k*k/(2*sigma*sigma)));
+    var sw=0; w.forEach(function(x){sw+=x;});
     var sm=new Array(m);
-    for(var d3=0;d3<m;d3++){
-      var acc=0;
-      for(var k2=-R;k2<=R;k2++){ acc+=counts[((d3+k2)%m+m)%m]*w[k2+R]; }
-      sm[d3]=acc/sw; // smoothed count centred on offset d3
+    for(var d3=0;d3<m;d3++){ var acc=0; for(var k2=-R;k2<=R;k2++){ acc+=counts[((d3+k2)%m+m)%m]*w[k2+R]; } sm[d3]=acc/sw; }
+    var peak=0; for(var d4=1;d4<m;d4++){ if(sm[d4]>sm[peak]) peak=d4; }
+    // pick the window radius around the peak that maximises conservative (Wilson-low) EV
+    var W=effWinReturn(), be=1/W, best=null;
+    for(var r=0;r<=5;r++){
+      var K=0, size=2*r+1;
+      for(var j=-r;j<=r;j++){ K+=counts[((peak+j)%m+m)%m]; }
+      var wl=wilson(K,np);
+      var cand={ r:r, size:size, K:K,
+        pHat: np>0?K/np:0, pLow: wl.low,
+        perHat: np>0?(K/np)/size:0, perLow: wl.low/size,
+        evHat: np>0?(K/np)*W-size:0, evLow: np>0?wl.low*W-size:0,
+        edgeHat: np>0?((K/np)*W-size)/size*100:0, edgeLow: np>0?(wl.low*W-size)/size*100:0,
+        winrate: np>0?(K/np)*100:0 };
+      if(best===null || cand.evLow>best.evLow) best=cand;
     }
-    var sdRaw=np>0? Math.sqrt(np*(1/m)*(1-1/m)) : 0;
-    var sdSm=sdRaw*Math.sqrt(sw2)/sw;
-    var rows=[];
-    for(var d4=0;d4<m;d4++){ rows.push({d:d4,c:counts[d4],sm:sm[d4],z: sdSm>0?(sm[d4]-E)/sdSm:0}); }
-    var best=rows.slice().sort(function(x,y){return y.sm-x.sm;})[0];
-    return {np:np,counts:counts,sm:sm,E:E,chi2:chi2,p:p,rows:rows,best:best,sdSm:sdSm};
+    return {np:np,counts:counts,sm:sm,E:E,chi2:chi2,p:p,peak:peak,W:W,be:be,best:best};
   }
 
   function renderDist(a){
     var s=spins();
     var o=analyzeOffsets(s);
+    var be=o.be, last = s.length? s[s.length-1] : null;
+
     $("distCards").innerHTML=
       card("連続ペア数", o.np, o.np>=400?"十分な母数":(o.np>=150?"あと少し":"母数不足"))+
       card("オフセットχ²", o.np?o.chi2.toFixed(1):"—", "df=37 / p="+(o.np?fmtP(o.p):"—"))+
-      card("最頻オフセット", o.np? (o.best.d+" 個先") : "—", o.np? "平滑後 Z=+"+o.best.z.toFixed(1) : "—")+
-      card("その距離の実測", o.np? o.best.c+"回" : "—", "期待 "+(o.np?o.E.toFixed(1):"0"));
+      card("損益分岐/目", (be*100).toFixed(2)+"%", "倍率込み・実効"+o.W.toFixed(1)+"倍")+
+      card("狙う窓EV", (o.np&&o.best?(o.best.edgeHat>=0?"+":"")+o.best.edgeHat.toFixed(1):"—")+"%", o.np&&o.best?"保守 "+(o.best.edgeLow>=0?"+":"")+o.best.edgeLow.toFixed(1)+"%":"—");
 
+    // smoothed histogram with the chosen window highlighted
     var m=N_POCKETS, maxc=Math.max.apply(null,o.sm.concat([0.001]));
-    var hot={}; o.rows.forEach(function(r){ if(r.z>=2) hot[r.d]=1; });
+    var inWin={}; if(o.best){ for(var j=-o.best.r;j<=o.best.r;j++){ inWin[((o.peak+j)%m+m)%m]=1; } }
     var strip='<div class="wheelstrip">';
     for(var d=0; d<m; d++){
       var hh=Math.max(2, Math.round(o.sm[d]/maxc*40));
-      strip+='<div class="wcell'+(hot[d]?' hotarc':'')+'"><div class="wbar"><i style="height:'+hh+'px"></i></div><div class="wlab">'+d+'</div></div>';
+      strip+='<div class="wcell'+(inWin[d]?' hotarc':'')+'"><div class="wbar"><i style="height:'+hh+'px"></i></div><div class="wlab">'+d+'</div></div>';
     }
     strip+='</div>';
     $("distHist").innerHTML=strip;
 
     var v=$("distVerdict"), main=$("dMain"), sub=$("dSub");
     v.className="verdict";
-    var last = s.length? s[s.length-1] : null;
     if(o.np<150){
       v.classList.add("v-wait");
       main.textContent="まだ判断できない（ペア "+o.np+"/150+）";
@@ -618,22 +634,30 @@
       $("distPred").innerHTML='<div class="empty">データ待ち</div>';
       return;
     }
+    var winOffs=[]; if(o.best){ for(var j2=-o.best.r;j2<=o.best.r;j2++){ winOffs.push(((o.peak+j2)%m+m)%m); } }
+    function zonePockets(){
+      if(last==null) return '';
+      var li=IDX[last];
+      var chips=winOffs.map(function(d){ var p=WHEEL_ORDER[(li+d)%m]; return '<div class="chip c-'+colorOf(p)+'" title="'+d+'個先">'+p+'</div>'; }).join("");
+      return '<div class="note-block" style="margin-bottom:10px">直前の目 <b class="mono">'+last+'</b> を基準に、距離 <b class="mono">'+o.peak+'±'+o.best.r+'</b> の窓＝<b>次に張るゾーン</b>（'+o.best.size+'目・分散込み）：</div><div class="recent" style="flex-wrap:wrap;overflow:visible">'+chips+'</div>';
+    }
+    if(o.p<0.05 && o.best && o.best.evLow>0){
+      v.classList.add("v-hit");
+      main.innerHTML="GO — 距離 <b class='mono'>"+o.peak+"±"+o.best.r+"</b> の "+o.best.size+"目 / 勝率 "+o.best.winrate.toFixed(0)+"%";
+      sub.textContent="賭け額あたり +"+o.best.edgeHat.toFixed(1)+"%（保守側でも +"+o.best.edgeLow.toFixed(1)+"%）。オフセットχ² p="+fmtP(o.p)+"。前の目からこの距離帯へ均等ベット。";
+      $("distPred").innerHTML=zonePockets();
+      return;
+    }
     if(o.p<0.05){
-      v.classList.add(o.p<0.01?"v-hit":"v-maybe");
-      main.innerHTML="距離に偏りの兆候 → 最頻 <b class='mono'>"+o.best.d+"個先</b>";
-      sub.textContent="オフセットχ² p="+fmtP(o.p)+"。前の目を基準にこの距離帯を狙える可能性。ただし連続スピンが機械的に連動してる場合のみ本物。";
-      if(last!=null){
-        var li=IDX[last];
-        var picks=o.rows.slice().sort(function(x,y){return y.sm-x.sm;}).filter(function(r){return r.z>=1.5;}).slice(0,8);
-        if(!picks.length) picks=o.rows.slice().sort(function(x,y){return y.sm-x.sm;}).slice(0,5);
-        var chips=picks.map(function(r){ var p=WHEEL_ORDER[(li+r.d)%N_POCKETS]; return '<div class="chip c-'+colorOf(p)+'" title="'+r.d+'個先">'+p+'</div>'; }).join("");
-        $("distPred").innerHTML='<div class="note-block" style="margin-bottom:10px">直前の目 <b class="mono">'+last+'</b> を基準に、平滑後の距離分布が指す<b>次に狙うゾーン</b>（分散込み）：</div><div class="recent" style="flex-wrap:wrap;overflow:visible">'+chips+'</div>';
-      }
+      v.classList.add("v-maybe");
+      main.innerHTML="距離に偏りの兆候 → ピーク <b class='mono'>"+o.peak+"個先</b>";
+      sub.textContent="オフセットχ² p="+fmtP(o.p)+" で構造はありそう。でも保守EVがまだプラスに届かない（点推定 "+(o.best?o.best.edgeHat.toFixed(1):"—")+"%）。記録を増やして確定を。";
+      $("distPred").innerHTML=zonePockets();
       return;
     }
     v.classList.add("v-flat");
     main.textContent="距離は一様 — 連続スピンは独立";
-    sub.textContent="オフセットχ² p="+fmtP(o.p)+"。前の目と次の目に関係なし＝この攻め方は無理。絶対位置の偏り（分析タブ）に集中を。";
+    sub.textContent="オフセットχ² p="+fmtP(o.p)+"。前の目と次の目に関係なし＝この攻め方は無理。絶対位置の偏り（分析タブ）に切り替えを。";
     $("distPred").innerHTML='<div class="empty">距離ベースの予測は無効（前後は独立）</div>';
   }
 
@@ -665,7 +689,7 @@
       window.scrollTo(0,0);
     });
   });
-  $("jumpStats").addEventListener("click",function(){ document.querySelector('nav.tabs button[data-tab="stats"]').click(); });
+  $("jumpStats").addEventListener("click",function(){ document.querySelector('nav.tabs button[data-tab="dist"]').click(); });
 
   // ---- Wheel management ----
   wheelSel.addEventListener("change",function(){ db.current=wheelSel.value; save(); render(); });
