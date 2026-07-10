@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0a09">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Wheel Hunter">
+<meta name="description" content="エアボール式ルーレットのバイアス検出ツール — 1タップ記録＋χ²検定・Wilson信頼区間・セクター分析">
+<title>Wheel Hunter — バイアス検出</title>
+<style>
+  :root{
+    --bg:#0b0a09;
+    --panel:#151210;
+    --panel-2:#1d1917;
+    --line:#2a2320;
+    --ink:#f3ece2;
+    --ink-dim:#a89b8c;
+    --ink-faint:#6f6355;
+    --amber:#f5b301;
+    --amber-soft:#c8901a;
+    --red:#d23b34;
+    --green:#0f9d58;
+    --green-bright:#26d07c;
+    --neg:#e5544b;
+    --warn:#e0a92e;
+    --mono: ui-monospace, "SF Mono", "SFMono-Regular", "Menlo", "Roboto Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);}
+  body{max-width:560px;margin:0 auto;padding:0 0 96px;line-height:1.45;overscroll-behavior-y:contain;-webkit-text-size-adjust:100%;}
+  h1,h2,h3{margin:0;font-weight:650;text-wrap:balance;}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums;}
+  .eyebrow{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;}
+
+  /* Header */
+  header{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,#0b0a09 70%,rgba(11,10,9,.0));padding:14px 16px 10px;padding-top:calc(14px + env(safe-area-inset-top));}
+  .brand{display:flex;align-items:baseline;justify-content:space-between;gap:10px;}
+  .brand h1{font-size:19px;letter-spacing:-.01em;}
+  .brand h1 span{color:var(--amber);}
+  .wheelbar{display:flex;gap:8px;margin-top:10px;align-items:center;}
+  select,input,button{font-family:inherit;color:var(--ink);}
+  .wheelsel{flex:1;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-size:14px;font-weight:600;appearance:none;}
+  .mini{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:13px;font-weight:600;color:var(--ink-dim);}
+  .mini:active{background:var(--line);}
+
+  /* Verdict banner */
+  .verdict{margin:6px 16px 0;border-radius:14px;padding:14px 15px;border:1px solid var(--line);background:var(--panel);position:relative;overflow:hidden;}
+  .verdict .vlabel{font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;color:var(--ink-faint);}
+  .verdict .vmain{font-size:16px;font-weight:680;margin-top:3px;line-height:1.3;text-wrap:balance;}
+  .verdict .vsub{font-size:12.5px;color:var(--ink-dim);margin-top:5px;}
+  .verdict.v-wait{border-color:#2a2320;}
+  .verdict.v-flat{border-color:#33566b;box-shadow:inset 0 0 0 1px rgba(51,86,107,.25);}
+  .verdict.v-maybe{border-color:#6b5a1f;box-shadow:inset 0 0 30px -18px var(--warn);}
+  .verdict.v-hit{border-color:#1c6b45;box-shadow:inset 0 0 34px -14px var(--green-bright);}
+  .verdict .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:middle;}
+  .v-wait .dot{background:var(--ink-faint);}
+  .v-flat .dot{background:#5a9fc4;}
+  .v-maybe .dot{background:var(--warn);box-shadow:0 0 8px var(--warn);}
+  .v-hit .dot{background:var(--green-bright);box-shadow:0 0 10px var(--green-bright);animation:pulse 1.6s infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+  @media(prefers-reduced-motion:reduce){.v-hit .dot{animation:none}}
+
+  /* Tabs */
+  nav.tabs{display:flex;gap:4px;margin:14px 16px 0;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px;}
+  nav.tabs button{flex:1;border:0;background:transparent;color:var(--ink-dim);font-size:13px;font-weight:650;padding:9px 4px;border-radius:9px;letter-spacing:.01em;}
+  nav.tabs button.on{background:var(--panel-2);color:var(--ink);box-shadow:0 1px 0 rgba(0,0,0,.4);}
+  nav.tabs button .n{font-family:var(--mono);color:var(--amber);font-size:12px;margin-left:2px;}
+
+  section{padding:16px;display:none;}
+  section.on{display:block;}
+
+  /* Recent strip */
+  .recent{display:flex;gap:6px;overflow-x:auto;padding:2px 0 10px;margin-bottom:4px;}
+  .recent::-webkit-scrollbar{display:none;}
+  .chip{flex:0 0 auto;min-width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:14px;border:1px solid rgba(255,255,255,.08);}
+  .c-red{background:#7c1f1c;color:#ffdad7;}
+  .c-black{background:#211d1b;color:#e9e2d7;}
+  .c-green{background:#0c5c38;color:#c8f5df;}
+
+  .padwrap{margin-top:4px;}
+  .zerorow{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:7px;}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;}
+  .pad{border:1px solid rgba(255,255,255,.07);border-radius:11px;height:52px;font-family:var(--mono);font-weight:700;font-size:19px;display:flex;align-items:center;justify-content:center;position:relative;user-select:none;transition:transform .05s;}
+  .pad:active{transform:scale(.94);}
+  .pad.red{background:#8a221e;color:#ffe4e1;}
+  .pad.black{background:#242019;color:#f0e9dd;}
+  .pad.green{background:#0d6b41;color:#d3f8e6;}
+  .pad .cnt{position:absolute;top:3px;right:6px;font-size:10px;opacity:.7;font-weight:600;}
+  .pad.hot{outline:2px solid var(--green-bright);outline-offset:-2px;}
+  .pad.warm{outline:2px solid var(--warn);outline-offset:-2px;}
+
+  .logbar{display:flex;gap:8px;margin-top:14px;}
+  .logbar button{flex:1;border:1px solid var(--line);background:var(--panel-2);border-radius:11px;padding:12px;font-size:14px;font-weight:650;color:var(--ink-dim);}
+  .logbar button:active{background:var(--line);}
+  .logbar button.warn{color:var(--neg);}
+
+  /* Stats */
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:16px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:12px 13px;}
+  .card .k{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;}
+  .card .v{font-family:var(--mono);font-size:24px;font-weight:700;margin-top:3px;letter-spacing:-.02em;}
+  .card .v small{font-size:13px;color:var(--ink-dim);font-weight:600;}
+  .card .note{font-size:11.5px;color:var(--ink-dim);margin-top:2px;}
+  .card.wide{grid-column:1 / -1;}
+
+  h3.sec{font-size:13px;letter-spacing:.04em;color:var(--ink-dim);margin:20px 0 9px;font-weight:650;text-transform:uppercase;}
+  h3.sec:first-child{margin-top:2px;}
+
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:right;padding:7px 8px;border-bottom:1px solid var(--line);}
+  th{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;}
+  td:first-child,th:first-child{text-align:left;}
+  td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;}
+  .numbadge{display:inline-flex;width:26px;height:26px;border-radius:7px;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:13px;}
+  .b-red{background:#7c1f1c;color:#ffdad7;}
+  .b-black{background:#211d1b;color:#e9e2d7;}
+  .b-green{background:#0c5c38;color:#c8f5df;}
+  .ev-pos{color:var(--green-bright);font-weight:700;}
+  .ev-neg{color:var(--ink-dim);}
+  .tag{font-size:10px;font-weight:700;padding:2px 6px;border-radius:5px;letter-spacing:.04em;}
+  .tag.edge{background:rgba(38,208,124,.15);color:var(--green-bright);}
+  .tag.watch{background:rgba(224,169,46,.15);color:var(--warn);}
+
+  /* Sector heat */
+  .sector{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:14px;}
+  .heatrow{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;}
+  .hcell{flex:0 0 auto;width:100%;}
+  .wheelstrip{display:flex;gap:2px;overflow-x:auto;padding-bottom:8px;}
+  .wheelstrip::-webkit-scrollbar{height:5px;}
+  .wheelstrip::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px;}
+  .wcell{flex:0 0 auto;width:30px;text-align:center;}
+  .wbar{height:44px;display:flex;align-items:flex-end;justify-content:center;}
+  .wbar i{display:block;width:14px;border-radius:3px 3px 0 0;background:var(--amber-soft);}
+  .wlab{font-family:var(--mono);font-size:10px;margin-top:3px;color:var(--ink-dim);}
+  .wcell.hotarc .wlab{color:var(--green-bright);font-weight:700;}
+  .wcell.hotarc .wbar i{background:var(--green-bright);}
+
+  /* EV */
+  .field{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line);}
+  .field label{font-size:13.5px;font-weight:600;}
+  .field label small{display:block;color:var(--ink-faint);font-weight:500;font-size:11.5px;margin-top:1px;}
+  .field input{width:96px;text-align:right;background:var(--panel-2);border:1px solid var(--line);border-radius:9px;padding:9px 10px;font-family:var(--mono);font-size:15px;font-weight:600;}
+  .evout{margin-top:16px;background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:16px;}
+  .evbig{font-family:var(--mono);font-size:32px;font-weight:750;letter-spacing:-.02em;}
+  .evbig.pos{color:var(--green-bright);}
+  .evbig.neg{color:var(--neg);}
+  .evline{display:flex;justify-content:space-between;font-size:13px;padding:6px 0;color:var(--ink-dim);}
+  .evline b{color:var(--ink);font-family:var(--mono);font-weight:700;}
+
+  .note-block{font-size:12.5px;color:var(--ink-dim);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px 14px;line-height:1.55;}
+  .note-block b{color:var(--ink);}
+  .note-block.warn{border-color:#5c4a1c;}
+
+  .databtns{display:flex;flex-direction:column;gap:9px;}
+  .databtns button{border:1px solid var(--line);background:var(--panel-2);border-radius:11px;padding:13px;font-size:14px;font-weight:650;color:var(--ink);text-align:left;}
+  .databtns button.danger{color:var(--neg);border-color:#4a2320;}
+  .empty{color:var(--ink-faint);text-align:center;padding:30px 10px;font-size:13.5px;}
+  ::selection{background:var(--amber);color:#000;}
+  :focus-visible{outline:2px solid var(--amber);outline-offset:2px;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>WHEEL <span>HUNTER</span></h1>
+    <span class="eyebrow mono" id="totalTag">0 spins</span>
+  </div>
+  <div class="wheelbar">
+    <select class="wheelsel" id="wheelSel"></select>
+    <button class="mini" id="newWheel">＋台</button>
+  </div>
+</header>
+
+<div class="verdict v-wait" id="verdict">
+  <div class="vlabel"><span class="dot"></span>判定</div>
+  <div class="vmain" id="vMain">データ待ち</div>
+  <div class="vsub" id="vSub">出目を記録すると、偏りを統計判定するよ。</div>
+</div>
+
+<nav class="tabs">
+  <button class="on" data-tab="log">記録</button>
+  <button data-tab="stats">分析</button>
+  <button data-tab="strat">作戦</button>
+  <button data-tab="ev">EV</button>
+  <button data-tab="data">データ</button>
+</nav>
+
+<section class="on" id="tab-log">
+  <div class="recent" id="recent"></div>
+  <div class="padwrap" id="pad"></div>
+  <div class="logbar">
+    <button id="undo">↩︎ 取消</button>
+    <button id="jumpStats">分析を見る →</button>
+  </div>
+</section>
+
+<section id="tab-stats">
+  <div class="cards" id="cards"></div>
+  <h3 class="sec">熱い目 ランキング</h3>
+  <div id="hotTable"></div>
+  <h3 class="sec">セクター熱分布（物理配列順）</h3>
+  <div class="sector" id="sectorBox"></div>
+</section>
+
+<section id="tab-strat">
+  <div class="field" style="border:0;padding:0 0 12px">
+    <label>ストレートアップ配当<small>この台の1点張り配当。まず現場で確認</small></label>
+    <input class="mono" id="inPayout2" type="number" inputmode="decimal" value="35">
+  </div>
+  <div class="verdict v-wait" id="stratVerdict" style="margin:0 0 14px">
+    <div class="vlabel"><span class="dot"></span>今の指示</div>
+    <div class="vmain" id="sMain">データ待ち</div>
+    <div class="vsub" id="sSub"></div>
+  </div>
+  <div class="cards" id="stratCards"></div>
+  <h3 class="sec" style="color:var(--green-bright)">張る目（損益分岐を確信で超えた）</h3>
+  <div id="betList"></div>
+  <h3 class="sec" style="color:var(--neg)">避ける目（冷たいと確信）</h3>
+  <div id="avoidList"></div>
+  <h3 class="sec">様子見（まだ判断できない）</h3>
+  <div id="watchList"></div>
+  <div class="note-block" style="margin-top:16px">
+    <b>低分散の作戦。</b> 「張る目」に均等ベット、「避ける目」は捨てる。カバーする目が多いほど勝率が上がり分散は下がる。ただし<b>損益分岐を超える目しか張らない</b> — 「冷たくないだけ」の平均的な目を足すと、分散は下がっても期待値がマイナスに沈む。<br>もっと攻めたいなら、上の表で特にZが高い目に厚めに乗せる（＝ケリー）。
+  </div>
+</section>
+
+<section id="tab-ev">
+  <div class="note-block" style="margin-bottom:14px">
+    一番熱い目 <b id="evNum">—</b> の実測的中率をもとに期待値を計算。配当と倍率の条件を現場に合わせて調整して。
+  </div>
+  <div class="field">
+    <label>ストレートアップ配当<small>通常35。Lightning系は29〜30に下がってることが多い</small></label>
+    <input class="mono" id="inPayout" type="number" inputmode="decimal" value="35">
+  </div>
+  <div class="field">
+    <label>その目に倍率が乗る確率<small>1回転あたり。倍率機能OFFなら0</small></label>
+    <input class="mono" id="inQ" type="number" inputmode="decimal" value="0" step="0.01">
+  </div>
+  <div class="field">
+    <label>平均倍率<small>乗ったときの配当倍率（例:100〜500）</small></label>
+    <input class="mono" id="inM" type="number" inputmode="decimal" value="100">
+  </div>
+  <div class="evout" id="evOut"></div>
+</section>
+
+<section id="tab-data">
+  <div class="databtns">
+    <button id="expJSON">⬇︎ JSONで書き出し（バックアップ）</button>
+    <button id="expCSV">⬇︎ CSVで書き出し</button>
+    <button id="impBtn">⬆︎ JSONを読み込み</button>
+    <input type="file" id="impFile" accept="application/json" style="display:none">
+    <button class="danger" id="clearBtn">✕ この台のデータを全消去</button>
+  </div>
+  <div class="note-block warn" style="margin-top:16px">
+    <b>現実チェック。</b> バイアスは物理ホイール1台ごとに違う — 台を移ったら必ず「＋台」で別データにして。信頼できる判定には最低でも<b>数百〜千スピン</b>要る。カジノは偏りを監視・再調整するし、偏りが小さければ検出できても賭ける価値が無いこともある。<b>信頼区間の下限が損益分岐点を超えるまで、実際には賭けない。</b>
+  </div>
+</section>
+
+<script>
+(function(){
+  "use strict";
+  // ---- Roulette definitions (American, double-zero) ----
+  var RED = {1:1,3:1,5:1,7:1,9:1,12:1,14:1,16:1,18:1,19:1,21:1,23:1,25:1,27:1,30:1,32:1,34:1,36:1};
+  var WHEEL_ORDER = ["0","28","9","26","30","11","7","20","32","17","5","22","34","15","3","24","36","13","1","00","27","10","25","29","12","8","19","31","18","6","21","33","16","4","23","35","14","2"];
+  var N_POCKETS = 38;
+  function colorOf(p){ if(p==="0"||p==="00") return "green"; return RED[+p]?"red":"black"; }
+
+  // ---- Storage ----
+  var LS="wheelhunter.v1";
+  var db = load();
+  function load(){
+    try{ var d=JSON.parse(localStorage.getItem(LS)); if(d&&d.wheels) return d; }catch(e){}
+    return {wheels:{"台 1":[]}, current:"台 1"};
+  }
+  function save(){ try{ localStorage.setItem(LS, JSON.stringify(db)); }catch(e){} }
+  function spins(){ return db.wheels[db.current]||[]; }
+
+  // ---- Stats math ----
+  function gammln(xx){
+    var cof=[76.18009172947146,-86.50532032941677,24.01409824083091,-1.231739572450155,0.1208650973866179e-2,-0.5395239384953e-5];
+    var x=xx,y=xx,tmp=x+5.5; tmp-=(x+0.5)*Math.log(tmp);
+    var ser=1.000000000190015; for(var j=0;j<6;j++){y+=1;ser+=cof[j]/y;}
+    return -tmp+Math.log(2.5066282746310005*ser/x);
+  }
+  function gser(a,x){ if(x<=0)return 0; var gln=gammln(a),ap=a,sum=1/a,del=1/a;
+    for(var n=0;n<300;n++){ap++;del*=x/ap;sum+=del;if(Math.abs(del)<Math.abs(sum)*1e-13)break;}
+    return sum*Math.exp(-x+a*Math.log(x)-gln); }
+  function gcf(a,x){ var gln=gammln(a),FP=1e-300,b=x+1-a,c=1/FP,d=1/b,h=d;
+    for(var i=1;i<=300;i++){var an=-i*(i-a);b+=2;d=an*d+b;if(Math.abs(d)<FP)d=FP;c=b+an/c;if(Math.abs(c)<FP)c=FP;d=1/d;var del=d*c;h*=del;if(Math.abs(del-1)<1e-13)break;}
+    return Math.exp(-x+a*Math.log(x)-gln)*h; }
+  function gammq(a,x){ if(x<0||a<=0)return 1; return x<a+1?1-gser(a,x):gcf(a,x); }
+  function chiP(chi2,df){ return gammq(df/2,chi2/2); }
+
+  // Wilson score interval (two-sided 95%, z=1.96) — conservative edge test
+  function wilson(k,n){
+    if(n===0) return {low:0,high:1}; var z=1.96, ph=k/n, z2=z*z;
+    var denom=1+z2/n, center=(ph+z2/(2*n))/denom;
+    var margin=z*Math.sqrt(ph*(1-ph)/n + z2/(4*n*n))/denom;
+    return {low:center-margin, high:center+margin};
+  }
+  function wilsonLow(k,n){ return wilson(k,n).low; }
+
+  function analyze(){
+    var s=spins(), n=s.length;
+    var counts={}; WHEEL_ORDER.forEach(function(p){counts[p]=0;});
+    s.forEach(function(p){ if(counts[p]!=null) counts[p]++; });
+    var E=n/N_POCKETS, p0=1/N_POCKETS;
+    var sd = n>0 ? Math.sqrt(n*p0*(1-p0)) : 0;
+    var chi2=0;
+    var rows=WHEEL_ORDER.map(function(p){
+      var o=counts[p]; if(n>0) chi2+=Math.pow(o-E,2)/E;
+      var ph = n>0? o/n : 0;
+      var z = sd>0? (o-E)/sd : 0;
+      var w = wilson(o,n);
+      return {p:p,o:o,ph:ph,z:z,low:w.low,high:w.high,color:colorOf(p)};
+    });
+    return {n:n,E:E,chi2:chi2,p:chiP(chi2,N_POCKETS-1),rows:rows,counts:counts};
+  }
+
+  // ---- UI refs ----
+  var $=function(id){return document.getElementById(id);};
+  var padEl=$("pad"), recentEl=$("recent"), wheelSel=$("wheelSel");
+
+  function buildPad(){
+    var html='<div class="zerorow">';
+    ["0","00"].forEach(function(p){ html+='<div class="pad green" data-p="'+p+'">'+p+'<span class="cnt" data-cnt="'+p+'"></span></div>'; });
+    html+='</div><div class="grid3">';
+    for(var i=1;i<=36;i++){ var c=colorOf(""+i); html+='<div class="pad '+c+'" data-p="'+i+'">'+i+'<span class="cnt" data-cnt="'+i+'"></span></div>'; }
+    html+='</div>';
+    padEl.innerHTML=html;
+    padEl.querySelectorAll(".pad").forEach(function(el){
+      el.addEventListener("click",function(){ addSpin(el.getAttribute("data-p")); });
+    });
+  }
+
+  function addSpin(p){
+    db.wheels[db.current].push(p); save();
+    if(navigator.vibrate) navigator.vibrate(12);
+    render();
+  }
+  function undo(){ var s=db.wheels[db.current]; if(s.length){ s.pop(); save(); render(); } }
+
+  function payoutVal(){ return parseFloat($("inPayout").value)||35; }
+  function payoutBreakeven(){ return 1/(payoutVal()+1); }
+
+  function renderRecent(){
+    var s=spins(); var last=s.slice(-24).reverse();
+    if(!last.length){ recentEl.innerHTML='<span class="empty" style="padding:8px">まだ記録なし — 出た目をタップ</span>'; return; }
+    recentEl.innerHTML=last.map(function(p){ return '<div class="chip c-'+colorOf(p)+'">'+p+'</div>'; }).join("");
+  }
+
+  function renderPadCounts(a){
+    var be=payoutBreakeven();
+    padEl.querySelectorAll(".pad").forEach(function(el){
+      var p=el.getAttribute("data-p");
+      var row=a.rows.find(function(r){return r.p===p;});
+      var cntEl=el.querySelector(".cnt");
+      cntEl.textContent = row&&row.o? row.o : "";
+      el.classList.remove("hot","warm");
+      if(!row||a.n<80) return;
+      if(row.low>be) el.classList.add("hot");
+      else if(row.z>=2) el.classList.add("warm");
+    });
+  }
+
+  function renderVerdict(a){
+    var v=$("verdict"), main=$("vMain"), sub=$("vSub");
+    v.className="verdict";
+    var be=payoutBreakeven();
+    var edges=a.rows.filter(function(r){return r.low>be;}).sort(function(x,y){return y.low-x.low;});
+    var watch=a.rows.filter(function(r){return r.z>=2.5 && r.low<=be;}).sort(function(x,y){return y.z-x.z;});
+    if(a.n<80){
+      v.classList.add("v-wait");
+      main.textContent="データ不足 — あと"+(80-a.n)+"スピン記録して";
+      sub.textContent="80スピン超えるまでは何を見てもノイズ。信頼できる判定には数百〜千が理想。";
+      return;
+    }
+    if(edges.length){
+      v.classList.add("v-hit");
+      var e=edges[0];
+      main.innerHTML="利益が出る偏りを検出 → <b class='mono'>"+e.p+"</b>";
+      sub.textContent="実測 "+(e.ph*100).toFixed(2)+"% / 信頼下限 "+(e.low*100).toFixed(2)+"% > 損益分岐 "+(be*100).toFixed(2)+"%。χ²検定 p="+fmtP(a.p)+"。分析タブで確認を。";
+      return;
+    }
+    if(a.p<0.05){
+      v.classList.add("v-maybe");
+      main.textContent="ホイールは非一様の兆候あり";
+      sub.textContent="χ²検定 p="+fmtP(a.p)+"（<0.05）。ただし『賭けて利益が出る』水準の目はまだ無い。"+(watch.length?("監視中: "+watch.slice(0,3).map(function(r){return r.p;}).join(", ")):"記録を増やして。");
+      return;
+    }
+    v.classList.add("v-flat");
+    main.textContent="今のところ一様 — 偏りの証拠なし";
+    sub.textContent="χ²検定 p="+fmtP(a.p)+"。"+(a.n<400?"まだ"+a.n+"スピン。数百まで回せば埋もれた偏りが出るかも。":"この台は素直かも。別台も試す価値あり。");
+  }
+  function fmtP(p){ if(p<0.0001) return "<0.0001"; return p.toFixed(4); }
+
+  function renderCards(a){
+    var be=payoutBreakeven();
+    var edges=a.rows.filter(function(r){return r.low>be;}).length;
+    var target = a.n<500? 500 : (a.n<1000?1000:2000);
+    $("cards").innerHTML=
+      card("記録スピン", a.n, a.n>=500?"十分な母数":(a.n>=200?"あと少し":"母数不足"))+
+      card("χ² 統計量", a.chi2.toFixed(1), "df=37 / p="+fmtP(a.p))+
+      card("利益候補の目", edges, edges?"信頼下限が損益分岐超え":"まだ無し")+
+      card("目標まで", (target-a.n>0?target-a.n:0), "信頼判定の目安 "+target);
+  }
+  function card(k,v,note){ return '<div class="card"><div class="k">'+k+'</div><div class="v mono">'+v+'</div><div class="note">'+note+'</div></div>'; }
+
+  function badge(p){ return '<span class="numbadge b-'+colorOf(p)+'">'+p+'</span>'; }
+
+  function renderHotTable(a){
+    var be=payoutBreakeven();
+    if(a.n<1){ $("hotTable").innerHTML='<div class="empty">記録なし</div>'; return; }
+    var ranked=a.rows.slice().sort(function(x,y){return y.o-x.o || y.low-x.low;}).slice(0,10);
+    var h='<table><thead><tr><th>目</th><th>回数</th><th>実測%</th><th>Z</th><th>信頼下限%</th><th></th></tr></thead><tbody>';
+    ranked.forEach(function(r){
+      var edge=r.low>be, watch=!edge&&r.z>=2;
+      h+='<tr><td>'+badge(r.p)+'</td><td class="num">'+r.o+'</td><td class="num '+(r.ph>be?'ev-pos':'ev-neg')+'">'+(r.ph*100).toFixed(2)+'</td><td class="num">'+(r.z>=0?'+':'')+r.z.toFixed(1)+'</td><td class="num '+(edge?'ev-pos':'ev-neg')+'">'+(r.low*100).toFixed(2)+'</td><td>'+(edge?'<span class="tag edge">EDGE</span>':(watch?'<span class="tag watch">監視</span>':''))+'</td></tr>';
+    });
+    h+='</tbody></table><div class="card" style="margin-top:12px"><div class="note">損益分岐 = '+(be*100).toFixed(2)+'%（配当'+((parseFloat($("inPayout").value)||35))+':1）。<b class="mono" style="color:var(--ink)">信頼下限%</b> がこれを超えた目だけが、実際に賭けて勝てる。Zは期待からの標準偏差。</div></div>';
+    $("hotTable").innerHTML=h;
+  }
+
+  function renderSector(a){
+    if(a.n<1){ $("sectorBox").innerHTML='<div class="empty">記録なし</div>'; return; }
+    var W=5; // window of adjacent pockets
+    var order=WHEEL_ORDER, m=order.length;
+    var cnt=order.map(function(p){return a.counts[p];});
+    var best={sum:-1,i:0};
+    var sums=[];
+    for(var i=0;i<m;i++){ var ssum=0; for(var k=0;k<W;k++){ ssum+=cnt[(i+k)%m]; } sums.push(ssum); if(ssum>best.sum){best.sum=ssum;best.i=i;} }
+    var expW=W*a.n/N_POCKETS;
+    var sdW=Math.sqrt(W*a.n*(1/N_POCKETS)*(1-1/N_POCKETS));
+    var zW=sdW>0?(best.sum-expW)/sdW:0;
+    var hotSet={}; for(var k2=0;k2<W;k2++){ hotSet[(best.i+k2)%m]=1; }
+    var maxc=Math.max.apply(null,cnt.concat([1]));
+    var strip='<div class="wheelstrip">';
+    for(var j=0;j<m;j++){
+      var hh=Math.max(2, Math.round(cnt[j]/maxc*40));
+      strip+='<div class="wcell'+(hotSet[j]?' hotarc':'')+'"><div class="wbar"><i style="height:'+hh+'px"></i></div><div class="wlab">'+order[j]+'</div></div>';
+    }
+    strip+='</div>';
+    var arcNums=[]; for(var k3=0;k3<W;k3++){ arcNums.push(order[(best.i+k3)%m]); }
+    var verdict = zW>=3? '<span class="ev-pos">強い物理バイアスの疑い</span>' : (zW>=2? '<span style="color:var(--warn)">やや過剰 — 監視</span>' : '通常の範囲');
+    $("sectorBox").innerHTML=strip+
+      '<div class="note" style="font-size:12.5px;color:var(--ink-dim);margin-top:10px;line-height:1.55">最も熱い隣接5ポケット: <b class="mono" style="color:var(--ink)">'+arcNums.join(" · ")+'</b><br>合計 '+best.sum+'回（期待 '+expW.toFixed(1)+'）/ Z=+'+zW.toFixed(1)+' → '+verdict+'。<br>単独の目より、隣り合うポケットがまとまって熱いほうが本物の物理偏りの証拠。</div>';
+  }
+
+  function chipList(rows, el, emptyMsg){
+    if(!rows.length){ document.getElementById(el).innerHTML='<div class="empty" style="padding:14px">'+emptyMsg+'</div>'; return; }
+    document.getElementById(el).innerHTML='<div class="recent" style="flex-wrap:wrap;overflow:visible">'+
+      rows.map(function(r){ return '<div class="chip c-'+r.color+'" title="'+r.o+'回 / '+(r.ph*100).toFixed(2)+'%">'+r.p+'</div>'; }).join("")+'</div>';
+  }
+
+  function renderStrat(a){
+    var X=payoutVal(), be=1/(X+1);
+    var bet=[], avoid=[], watch=[];
+    a.rows.forEach(function(r){
+      if(a.n<40){ watch.push(r); return; }
+      if(r.low>be) bet.push(r);
+      else if(r.high<be) avoid.push(r);
+      else watch.push(r);
+    });
+    bet.sort(function(x,y){return y.ph-x.ph;});
+    avoid.sort(function(x,y){return x.ph-y.ph;});
+    watch.sort(function(x,y){return y.ph-x.ph;});
+
+    var k=bet.length;
+    var P=bet.reduce(function(s,r){return s+r.ph;},0);        // point estimate hit prob
+    var Plow=bet.reduce(function(s,r){return s+r.low;},0);    // conservative
+    var evSpin=k>0? P*(X+1)-k : 0;                            // net units per spin (stake k units)
+    var evSpinLow=k>0? Plow*(X+1)-k : 0;
+    var edgePct=k>0? evSpin/k*100 : 0;                        // per unit wagered
+    var edgeLowPct=k>0? evSpinLow/k*100 : 0;
+    var winrate=P*100;
+
+    var v=$("stratVerdict"), main=$("sMain"), sub=$("sSub");
+    v.className="verdict";
+    if(a.n<150){
+      v.classList.add("v-wait");
+      main.textContent="まだ賭けるな — 記録を続けろ（"+a.n+"/150+）";
+      sub.textContent="150スピン未満だと『張る目』の確定は無理。今は1ドルも張らず、ひたすらタップ。理想は500〜1000。";
+    } else if(k>0 && edgeLowPct>0){
+      v.classList.add("v-hit");
+      main.innerHTML="GO — "+k+"目に均等ベット / 勝率 "+winrate.toFixed(0)+"%";
+      sub.textContent="賭け額あたり期待値 +"+edgePct.toFixed(1)+"%（保守側でも +"+edgeLowPct.toFixed(1)+"%）。下の『張る目』を felt で探して均等に置く。";
+    } else if(k>0){
+      v.classList.add("v-maybe");
+      main.innerHTML=k+"目が候補 — ただしまだ確信不足";
+      sub.textContent="点推定では +"+edgePct.toFixed(1)+"% だが、保守側だと "+edgeLowPct.toFixed(1)+"%。もう少し記録して確定させてから張れ。";
+    } else if(a.p<0.05){
+      v.classList.add("v-maybe");
+      main.textContent="偏りの兆候あり、でも張れる目はまだ無い";
+      sub.textContent="χ² p="+fmtP(a.p)+"。損益分岐("+(be*100).toFixed(2)+"%)を確信で超える目がまだ無い。避ける目: "+(avoid.length?avoid.slice(0,6).map(function(r){return r.p;}).join(", "):"—");
+    } else {
+      v.classList.add("v-flat");
+      main.textContent="この台は一様 — 低分散でもプラスにできない";
+      sub.textContent="χ² p="+fmtP(a.p)+"。避けるべき冷たい目も確定してない。別台を探す方が早い。";
+    }
+
+    $("stratCards").innerHTML=
+      card("配当 / 損益分岐", X+":1", "的中率 "+(be*100).toFixed(2)+"% で±0")+
+      card("張る目の数", k, k?"カバー率 "+((k/N_POCKETS)*100).toFixed(0)+"%":"まだ無し")+
+      card("想定 勝率", winrate.toFixed(0)+"%", k?"1スピンで当たる確率":"—")+
+      card("賭け額あたりEV", (edgePct>=0?"+":"")+edgePct.toFixed(1)+"%", k?"保守側 "+(edgeLowPct>=0?"+":"")+edgeLowPct.toFixed(1)+"%":"—");
+
+    chipList(bet,"betList", a.n<150?"データ不足":"確信を持って張れる目はまだ無い");
+    chipList(avoid,"avoidList", a.n<150?"データ不足":"確信を持って外せる冷たい目はまだ無い");
+    chipList(watch,"watchList","—");
+  }
+
+  function renderEV(a){
+    var be=payoutBreakeven();
+    var ranked=a.rows.slice().sort(function(x,y){return y.o-x.o;});
+    var top=ranked[0];
+    $("evNum").textContent = top&&top.o? top.p+"（実測 "+(top.ph*100).toFixed(2)+"%）" : "—（データ待ち）";
+    var X=parseFloat($("inPayout").value)||0;
+    var q=Math.min(1,Math.max(0,parseFloat($("inQ").value)||0));
+    var M=parseFloat($("inM").value)||0;
+    var ph = top&&top.o? top.ph : 0;
+    // win return per unit: base payout normally, multiplier payout when struck
+    var winRet = (1-q)*(X+1) + q*(M+1);
+    var ev = ph*winRet - 1;
+    var evBase = ph*(X+1) - 1;
+    var breakevenPh = winRet>0? 1/winRet : 1;
+    var cls = ev>0?"pos":"neg";
+    $("evOut").innerHTML=
+      '<div class="k" style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:600">1ドルあたり期待値</div>'+
+      '<div class="evbig '+cls+'">'+(ev>=0?"+":"")+(ev*100).toFixed(1)+'%</div>'+
+      '<div class="evline"><span>倍率なしの素の期待値</span><b>'+(evBase>=0?"+":"")+(evBase*100).toFixed(1)+'%</b></div>'+
+      '<div class="evline"><span>この目の実測的中率</span><b>'+(ph*100).toFixed(2)+'%</b></div>'+
+      '<div class="evline"><span>損益分岐に必要な的中率</span><b>'+(breakevenPh*100).toFixed(2)+'%</b></div>'+
+      '<div class="note-block" style="margin-top:14px">'+(a.n<200?'<b>まだ母数が少ない（'+a.n+'）。</b>この的中率は当てにならない。数百スピン貯めてから判断を。':(ev>0?'<b>理論上プラス。</b>ただし信頼下限（分析タブ）が損益分岐を超えているか必ず確認してから賭けること。':'<b>まだマイナス。</b>この目の的中率が損益分岐を超えないと勝てない。'))+'</div>';
+  }
+
+  function renderWheelSel(){
+    var names=Object.keys(db.wheels);
+    wheelSel.innerHTML=names.map(function(nm){ return '<option'+(nm===db.current?' selected':'')+'>'+nm+'</option>'; }).join("");
+  }
+
+  function render(){
+    var a=analyze();
+    $("totalTag").textContent=a.n+" spins";
+    renderRecent();
+    renderPadCounts(a);
+    renderVerdict(a);
+    renderCards(a);
+    renderHotTable(a);
+    renderSector(a);
+    renderStrat(a);
+    renderEV(a);
+  }
+
+  // ---- Tabs ----
+  document.querySelectorAll("nav.tabs button").forEach(function(b){
+    b.addEventListener("click",function(){
+      document.querySelectorAll("nav.tabs button").forEach(function(x){x.classList.remove("on");});
+      document.querySelectorAll("section").forEach(function(x){x.classList.remove("on");});
+      b.classList.add("on"); $("tab-"+b.getAttribute("data-tab")).classList.add("on");
+      window.scrollTo(0,0);
+    });
+  });
+  $("jumpStats").addEventListener("click",function(){ document.querySelector('nav.tabs button[data-tab="stats"]').click(); });
+
+  // ---- Wheel management ----
+  wheelSel.addEventListener("change",function(){ db.current=wheelSel.value; save(); render(); });
+  $("newWheel").addEventListener("click",function(){
+    var nm=prompt("新しい台の名前（例: シーザーズ Lightning A）","台 "+(Object.keys(db.wheels).length+1));
+    if(!nm) return; if(db.wheels[nm]){ alert("その名前は既にあるよ"); return; }
+    db.wheels[nm]=[]; db.current=nm; save(); renderWheelSel(); render();
+  });
+
+  // ---- Log buttons ----
+  $("undo").addEventListener("click",undo);
+  document.addEventListener("keydown",function(e){ if(e.key==="Backspace"&&e.target.tagName!=="INPUT"){ undo(); } });
+
+  // ---- EV / payout inputs (two payout fields kept in sync) ----
+  $("inPayout").addEventListener("input",function(){ $("inPayout2").value=$("inPayout").value; render(); });
+  $("inPayout2").addEventListener("input",function(){ $("inPayout").value=$("inPayout2").value; render(); });
+  ["inQ","inM"].forEach(function(id){ $(id).addEventListener("input",function(){ render(); }); });
+
+  // ---- Data ----
+  function dl(name,text,type){
+    var blob=new Blob([text],{type:type}); var u=URL.createObjectURL(blob);
+    var a=document.createElement("a"); a.href=u; a.download=name; a.click(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
+  }
+  $("expJSON").addEventListener("click",function(){ dl("wheelhunter-backup.json", JSON.stringify(db,null,2), "application/json"); });
+  $("expCSV").addEventListener("click",function(){
+    var lines=["wheel,index,pocket,color"];
+    Object.keys(db.wheels).forEach(function(w){ db.wheels[w].forEach(function(p,i){ lines.push([w,i+1,p,colorOf(p)].join(",")); }); });
+    dl("wheelhunter.csv", lines.join("\n"), "text/csv");
+  });
+  $("impBtn").addEventListener("click",function(){ $("impFile").click(); });
+  $("impFile").addEventListener("change",function(e){
+    var f=e.target.files[0]; if(!f) return; var r=new FileReader();
+    r.onload=function(){ try{ var d=JSON.parse(r.result); if(d&&d.wheels){ db=d; save(); renderWheelSel(); render(); alert("読み込んだよ"); } else alert("形式が違うみたい"); }catch(err){ alert("読めなかった: "+err.message); } };
+    r.readAsText(f);
+  });
+  $("clearBtn").addEventListener("click",function(){
+    if(confirm('「'+db.current+'」の記録を全部消す？ この操作は戻せない。')){ db.wheels[db.current]=[]; save(); render(); }
+  });
+
+  // ---- Init ----
+  buildPad(); renderWheelSel(); render();
+})();
+</script>
+</body>
+</html>
