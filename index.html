@@ -206,7 +206,7 @@
     <div class="vsub" id="betSub"></div>
   </div>
   <div id="betList"></div>
-  <div class="note-block" style="margin-top:14px">直前の目から距離モデルで選んだ<b>期待値の高い順14点</b>。各行はその数字に$1賭けた時の期待損益（倍率無視・素の29:1）。<b>期待値がプラスの数字</b>が実際に効いてる本命、<b>合計</b>がプラスなら14点まとめて+EV。母数が薄いうちは選択の偶然で高く出るので、実地で「約半分当たるか」も併せて見て。</div>
+  <div class="note-block" style="margin-top:14px">直前の目から距離モデルで、<b>期待値がプラスの数字だけ</b>を表示（マイナスの穴は張らない）。各行はその数字に$1賭けた時の期待損益（倍率無視・素の29:1、的中率×30−1）。<b>本命</b>タグ＝Wilson下限も損益分岐超えで統計的に確定。<b>点推定の合計は良い数字だけ拾うので必ず＋に見える</b> — 信じるのは<b>保守EVが＋</b>と、実地で本当に当たるか。</div>
 </section>
 
 <section id="tab-dist">
@@ -221,7 +221,7 @@
   <h3 class="sec">オフセット分布（前の目から時計回り何個先か・平滑後）</h3>
   <div class="sector" id="distHist"></div>
   <div class="note-block" style="margin-top:14px">
-    横軸は「前の目から<b>時計回り(+)／反時計回り(−)</b>に何個ずれたか」。ホイールは円環なので0の隣は+1と−1でつながってる。着地は物理的にばらつくから、ガウス平滑（σ=1・±3個、円環で回り込む＝0に入れば−1,−2,+1,+2…にも配分）で確率場を作り、<b>期待値の高い順に14点</b>を選ぶ（緑バー）。<b>倍率は無視・素の29:1</b>で計算。14点だと<b>損益分岐は的中率46.7%（≈半分）</b> — 「2回に1回当たれば勝ち」の体感と一致。<b>いつでも張れる</b>：<b>期待値</b>が1超で勝ち、<b>保守EV</b>（Wilson下限）も1超で本物。低いうちはランク稼ぎの最低額で。<b>データ信頼値</b>は母数と信号で動く目安。χ²は分布が偶然の平坦でないかの全体検定（p&lt;0.05で構造あり）。ずっと平ら＝前後独立の台は見切る。
+    横軸は「前の目から<b>時計回り(+)／反時計回り(−)</b>に何個ずれたか」。ホイールは円環なので0の隣は+1と−1でつながってる。着地は物理的にばらつくから、ガウス平滑（σ=1・±3個、円環で回り込む＝0に入れば−1,−2,+1,+2…にも配分）で確率場を作り、そこから<b>期待値がプラスの距離だけ</b>を採用（緑バー）。<b>倍率は無視・素の29:1</b>で計算、各距離の的中率が<b>3.33%超え</b>で+EV。<b>合計EV（保守）が0超え</b>で本物、それまではランク稼ぎの最低額で。χ²は分布が偶然の平坦でないかの全体検定（p&lt;0.05で構造あり）。ずっと平ら＝前後独立の台は見切る。
   </div>
 </section>
 
@@ -364,11 +364,11 @@
   // not absolute frequency. Green when the zone is a confirmed GO, amber when tentative.
   function renderPadCounts(a){
     var s=spins(), o=analyzeOffsets(s), m=N_POCKETS, last=s.length?s[s.length-1]:null, pl=o.plan;
-    var strong = pl.evLow>1;
+    var strong = pl.profitLow>0;
     var zone={};
     if(last!=null && o.np>=10){
       var li=IDX[last];
-      pl.picks.forEach(function(d){ zone[WHEEL_ORDER[(li+d)%m]]=1; });
+      pl.betSet.forEach(function(r){ zone[WHEEL_ORDER[(li+r.d)%m]]=1; });
     }
     padEl.querySelectorAll(".pad").forEach(function(el){
       var p=el.getAttribute("data-p");
@@ -384,18 +384,23 @@
   function renderVerdict(a){
     var v=$("verdict"), main=$("vMain"), sub=$("vSub");
     v.className="verdict";
-    var s=spins(), o=analyzeOffsets(s), last=s.length?s[s.length-1]:null, m=N_POCKETS, pl=o.plan, conf=pl.conf;
+    var s=spins(), o=analyzeOffsets(s), last=s.length?s[s.length-1]:null, m=N_POCKETS, pl=o.plan;
     if(o.np<10){
       v.classList.add("v-wait");
       main.textContent="まず回して記録（ペア "+o.np+"）";
-      sub.textContent="数回タップすれば、直前の目からの14点と期待値を出す。最低額から回してOK。";
+      sub.textContent="数回タップすれば、直前の目から期待値プラスの数字と合計EVを出す。最低額から回してOK。";
       return;
     }
-    var cls = pl.evLow>1? "v-hit" : (pl.ev>1? "v-maybe" : "v-flat");
+    var cls = pl.profitLow>0? "v-hit" : (pl.k>0? "v-maybe" : "v-flat");
     v.classList.add(cls);
-    main.innerHTML="14点｜期待値 <b class='mono'>"+pl.ev.toFixed(2)+"</b>"+(pl.ev>1?"（＞1 勝てる）":"（＜1）")+" ｜信頼値 <b class='mono'>"+(conf*100).toFixed(0)+"%</b>";
-    var advice = pl.evLow>1? "本張りOK" : (pl.ev>1? "小〜中で実地確認" : "最低額でランク稼ぎ＆記録");
-    sub.textContent="保守EV "+pl.evLow.toFixed(2)+" ｜的中率 "+(pl.P*100).toFixed(0)+"%（損益分岐≈"+(pl.beP*100).toFixed(0)+"%）｜χ² p="+fmtP(o.p)+"。"+advice+"。詳細は距離作戦タブ"+(last!=null?"（直前 "+last+"）":"")+"。";
+    if(pl.k===0){
+      main.innerHTML="+EVの数字なし ｜ 最低額でランク稼ぎ";
+      sub.textContent="どの距離も損益分岐（"+(pl.beP1*100).toFixed(1)+"%）超え未確認。χ² p="+fmtP(o.p)+"。記録を継続。";
+      return;
+    }
+    main.innerHTML="張る <b class='mono'>"+pl.k+"</b>個 ｜ 合計EV 保守 <b class='mono'>"+(pl.profitLow>=0?"+":"")+pl.profitLow.toFixed(2)+"</b> / 点 "+(pl.profitPoint>=0?"+":"")+pl.profitPoint.toFixed(2);
+    var advice = pl.profitLow>0? "本張りOK" : "実地確認しつつ小額";
+    sub.textContent="確定本命 "+pl.kConf+"個｜セット的中率 "+(pl.Pset*100).toFixed(0)+"%｜χ² p="+fmtP(o.p)+"。"+advice+"。詳細はベットタブ"+(last!=null?"（直前 "+last+"）":"")+"。";
   }
   function fmtP(p){ if(p<0.0001) return "<0.0001"; return p.toFixed(4); }
 
@@ -516,20 +521,21 @@
 
   function renderEV(a){
     var o=analyzeOffsets(spins()), pl=o.plan, X=payoutVal();
-    $("evNum").textContent = o.np? ("14点プラン（"+X+":1・倍率は無視）") : "—（データ待ち）";
+    $("evNum").textContent = o.np? ("+EVの数字だけ張るプラン（"+X+":1・倍率は無視）") : "—（データ待ち）";
     function line(l,val){ return '<div class="evline"><span>'+l+'</span><b>'+val+'</b></div>'; }
-    var cls = pl.ev>1?"pos":"neg";
+    var cls = pl.profitLow>0?"pos":"neg";
     $("evOut").innerHTML=
-      '<div class="k" style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:600">期待値（1ドルあたりの戻り・倍率無視）</div>'+
-      '<div class="evbig '+cls+'">'+(o.np?pl.ev.toFixed(2):"—")+'</div>'+
-      line("保守EV（Wilson下限）", o.np?pl.evLow.toFixed(2):"—")+
-      line("14点の合計的中率", o.np?(pl.P*100).toFixed(1)+"%":"—")+
-      line("損益分岐 的中率", (pl.beP*100).toFixed(1)+"%（≈半分）")+
+      '<div class="k" style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:600">合計期待値（保守・$1ずつ・1スピン）</div>'+
+      '<div class="evbig '+cls+'">'+(o.np?((pl.profitLow>=0?"+":"")+pl.profitLow.toFixed(2)):"—")+'</div>'+
+      line("合計期待値（点推定）", o.np?((pl.profitPoint>=0?"+":"")+pl.profitPoint.toFixed(2)):"—")+
+      line("張る数字の数", o.np?pl.k+"個（うち本命 "+pl.kConf+"個）":"—")+
+      line("$1あたりの戻り", o.np?pl.evPer.toFixed(2)+"（>1で勝ち）":"—")+
+      line("単一数字の損益分岐", (pl.beP1*100).toFixed(2)+"%（的中率）")+
       line("配当（1点的中で）", X+":1（戻り "+pl.flatRet+"倍）")+
-      line("1スピンの損益（14ドル賭け）", o.np?((pl.profit>=0?"+":"")+pl.profit.toFixed(2)+"ドル"):"—")+
       '<div class="note-block" style="margin-top:14px">'+
-        '倍率(200x等)は分散が大きすぎるのでEVから除外、<b>素の'+X+':1だけ</b>で判定。14点なので<b>損益分岐は'+(pl.beP*100).toFixed(0)+'%＝ほぼ半分</b> — 実際に「2回に1回」当たれば勝てるかの体感ラインと一致する。'+
-        (o.np<200?'<br><b>母数がまだ少ない（ペア'+o.np+'）。</b>点推定は選択の偶然で高めに出る。実地で半分当たるか＆保守EVで判断を。':(pl.evLow>1?'<br><b>保守EVも1超え＝本物。</b>':(pl.ev>1?'<br><b>点推定はプラス。</b>選択バイアスの可能性、実地確認を。':'<br><b>まだ1未満。</b>')))+
+        '倍率(200x等)は分散が大きすぎるのでEVから除外、<b>素の'+X+':1だけ</b>で判定。各距離の的中率が<b>'+(pl.beP1*100).toFixed(2)+'%超え</b>なら+EVで採用。'+
+        '<br><b>点推定の合計は、良い数字だけ拾うので必ずプラスに見える。</b>信じるのは<b>保守（Wilson下限）が0超え</b>と、実地で本当に当たるか。'+
+        (o.np<200?'<br>母数がまだ少ない（ペア'+o.np+'）。':(pl.profitLow>0?'<br><b>保守も0超え＝本物。</b>':'<br>まだ保守はプラス未達。'))+
       '</div>';
   }
 
@@ -556,24 +562,27 @@
     var sm=new Array(m);
     for(var d3=0;d3<m;d3++){ var acc=0; for(var k2=-R;k2<=R;k2++){ acc+=counts[((d3+k2)%m+m)%m]*w[k2+R]; } sm[d3]=acc/sw; }
     var peak=0; for(var d4=1;d4<m;d4++){ if(sm[d4]>sm[peak]) peak=d4; }
-    // --- 14-spot plan, FLAT 29:1 (multiplier ignored — too high-variance) ---
-    // Bet the 14 highest-EV offsets. EV per pocket ∝ predicted probability, so we
-    // rank by the smoothed field (variance-aware) and take the top 14.
-    var NBET=14, flatRet=payoutVal()+1;                 // 30 at 29:1
-    var ord=[]; for(var d5=0;d5<m;d5++) ord.push(d5);
-    ord.sort(function(x,y){ return sm[y]-sm[x] || counts[y]-counts[x]; });
-    var picks=ord.slice(0,NBET);
-    var Kbet=0; picks.forEach(function(d){ Kbet+=counts[d]; });
-    var P14 = np>0? Kbet/np : 0;                          // empirical hit prob of the 14
-    var wlp = wilson(Kbet,np);
-    var beP = NBET/flatRet;                              // break-even total hit prob = 14/30 ≈ 0.467
-    var ev  = np>0? flatRet*P14/NBET : 0;                // expected return per $1 staked
-    var evLow = np>0? flatRet*wlp.low/NBET : 0;          // conservative (Wilson low)
-    var SE14 = np>0? Math.sqrt(Math.max(P14*(1-P14),1e-9)/np) : 1;
-    var conf = np>=5? ncdf((P14-beP)/SE14)*(np/(np+80)) : 0; // grows with data & signal
-    var plan={ NBET:NBET, flatRet:flatRet, picks:picks, K:Kbet, P:P14, Plow:wlp.low,
-               beP:beP, ev:ev, evLow:evLow, conf:conf,
-               profit: np>0? flatRet*P14-NBET : 0 };      // $ P/L per spin on a $14 bet
+    // --- bet only the +EV offsets, FLAT 29:1 (multiplier ignored) ---
+    // Per-number EV on a $1 bet = p*30 - 1 (win +29 w.p. p, lose 1 otherwise).
+    // Bet every offset whose point EV > 0 (hit rate > 1/30 = 3.33%). Tag a number
+    // "本命" only if its Wilson-low also clears break-even (genuinely +EV, not noise).
+    var flatRet=payoutVal()+1;                 // 30 at 29:1
+    var beP1=1/flatRet;                         // single-number break-even hit prob
+    var offRows=[];
+    for(var d5=0;d5<m;d5++){
+      var c=counts[d5], p=np>0?c/np:0, wl=wilson(c,np);
+      offRows.push({d:d5, c:c, p:p, pLow:wl.low, evPoint:p*flatRet-1, evLow:wl.low*flatRet-1});
+    }
+    var betSet=offRows.filter(function(r){return r.evPoint>0;}).sort(function(a,b){return b.p-a.p;});
+    var confirmed=betSet.filter(function(r){return r.evLow>0;});
+    var k=betSet.length;
+    var Pset=betSet.reduce(function(s,r){return s+r.p;},0);
+    var profitPoint=betSet.reduce(function(s,r){return s+r.evPoint;},0); // = flatRet*Pset - k
+    var profitLow=betSet.reduce(function(s,r){return s+r.evLow;},0);      // conservative sum
+    var evPer=k>0? flatRet*Pset/k : 0;                                    // per $1 staked
+    var plan={ flatRet:flatRet, beP1:beP1, offRows:offRows, betSet:betSet, confirmed:confirmed,
+               k:k, kConf:confirmed.length, Pset:Pset,
+               profitPoint:profitPoint, profitLow:profitLow, evPer:evPer };
     return {np:np,counts:counts,sm:sm,E:E,chi2:chi2,p:p,peak:peak,plan:plan};
   }
 
@@ -589,16 +598,16 @@
   function renderDist(a){
     var s=spins();
     var o=analyzeOffsets(s);
-    var last = s.length? s[s.length-1] : null, m=N_POCKETS, pl=o.plan, conf=pl.conf;
+    var last = s.length? s[s.length-1] : null, m=N_POCKETS, pl=o.plan;
 
     $("distCards").innerHTML=
-      card("期待値（点推定）", o.np?pl.ev.toFixed(2):"—", ">1 で勝ち")+
-      card("期待値（保守）", o.np?pl.evLow.toFixed(2):"—", ">1 で本物")+
-      card("14点の的中率", o.np?(pl.P*100).toFixed(0)+"%":"—", "損益分岐 "+(pl.beP*100).toFixed(0)+"%（≈半分）")+
-      card("データ信頼値", (conf*100).toFixed(0)+"%", "母数と信号で変動");
+      card("張る数字", o.np?pl.k:"—", "点EV>0 の距離")+
+      card("合計EV（保守）", o.np?(pl.profitLow>=0?"+":"")+pl.profitLow.toFixed(2):"—", ">0 で本物")+
+      card("合計EV（点）", o.np?(pl.profitPoint>=0?"+":"")+pl.profitPoint.toFixed(2):"—", "選択で高めに出る")+
+      card("オフセットχ²", o.np?o.chi2.toFixed(1):"—", "p="+(o.np?fmtP(o.p):"—"));
 
-    // smoothed histogram, the 14 picked offsets highlighted
-    var picksSet={}; pl.picks.forEach(function(d){ picksSet[d]=1; });
+    // smoothed histogram, the +EV offsets highlighted
+    var picksSet={}; pl.betSet.forEach(function(r){ picksSet[r.d]=1; });
     var maxc=Math.max.apply(null,o.sm.concat([0.001]));
     var strip='<div class="wheelstrip">';
     for(var sgn=-18; sgn<=19; sgn++){
@@ -610,10 +619,11 @@
     $("distHist").innerHTML=strip;
 
     function planPockets(){
-      if(last==null) return '<div class="empty">1回記録すると、直前の目から14点を出す</div>';
+      if(last==null) return '<div class="empty">1回記録すると、直前の目から+EVの数字を出す</div>';
+      if(pl.k===0) return '<div class="empty">まだ+EVの距離なし（ベットタブで最低額の候補）</div>';
       var li=IDX[last];
-      var chips=pl.picks.map(function(d){ var p=WHEEL_ORDER[(li+d)%m]; return '<div class="chip c-'+colorOf(p)+'" title="距離 '+fmtOff(d)+'">'+p+'</div>'; }).join("");
-      return '<div class="note-block" style="margin-bottom:10px">直前の目 <b class="mono">'+last+'</b> を基準に、期待値の高い順 <b>14点</b>（この番号に均等ベット）：</div><div class="recent" style="flex-wrap:wrap;overflow:visible">'+chips+'</div>';
+      var chips=pl.betSet.map(function(r){ var p=WHEEL_ORDER[(li+r.d)%m]; return '<div class="chip c-'+colorOf(p)+'" title="距離 '+fmtOff(r.d)+' / EV '+r.evPoint.toFixed(2)+'">'+p+'</div>'; }).join("");
+      return '<div class="note-block" style="margin-bottom:10px">直前の目 <b class="mono">'+last+'</b> を基準に、期待値プラスの <b>'+pl.k+'個</b>（詳細はベットタブ）：</div><div class="recent" style="flex-wrap:wrap;overflow:visible">'+chips+'</div>';
     }
 
     var v=$("distVerdict"), main=$("dMain"), sub=$("dSub");
@@ -621,15 +631,20 @@
     if(o.np<10){
       v.classList.add("v-wait");
       main.textContent="まず回して記録（ペア "+o.np+"）";
-      sub.textContent="数回タップすれば、直前の目からの14点と期待値を出す。ランク稼ぎの最低額から。";
+      sub.textContent="数回タップすれば、期待値プラスの数字と合計EVを出す。ランク稼ぎの最低額から。";
       $("distPred").innerHTML=planPockets();
       return;
     }
-    var cls = pl.evLow>1? "v-hit" : (pl.ev>1? "v-maybe" : "v-flat");
+    var cls = pl.profitLow>0? "v-hit" : (pl.k>0? "v-maybe" : "v-flat");
     v.classList.add(cls);
-    main.innerHTML="14点プラン｜期待値 <b class='mono'>"+pl.ev.toFixed(2)+"</b>"+(pl.ev>1?"（＞1 勝てる）":"（＜1 まだ負け）");
-    var advice = pl.evLow>1? "本物の+EV。堂々と張っていい。" : (pl.ev>1? "点推定はプラス。選択の偶然かもなので小〜中で『半分当たるか』を実地確認。" : "まだ±0未満。最低額でランク稼ぎ＆記録を継続。");
-    sub.textContent="保守EV "+pl.evLow.toFixed(2)+"（>1で本物）｜的中率 "+(pl.P*100).toFixed(0)+"%（損益分岐≈"+(pl.beP*100).toFixed(0)+"%）｜信頼値 "+(conf*100).toFixed(0)+"%｜χ² p="+fmtP(o.p)+"。"+advice;
+    if(pl.k===0){
+      main.innerHTML="+EVの距離なし";
+      sub.textContent="どの距離も損益分岐（"+(pl.beP1*100).toFixed(1)+"%）超え未確認。χ² p="+fmtP(o.p)+"。記録を継続、最低額でランク稼ぎ。";
+    } else {
+      main.innerHTML="張る <b class='mono'>"+pl.k+"</b>個｜合計EV 保守 <b class='mono'>"+(pl.profitLow>=0?"+":"")+pl.profitLow.toFixed(2)+"</b>";
+      var advice = pl.profitLow>0? "本物の+EV。堂々と張っていい。" : "点推定はプラス。選択の偶然かも、小額で実地確認を。";
+      sub.textContent="点合計 "+(pl.profitPoint>=0?"+":"")+pl.profitPoint.toFixed(2)+"｜確定本命 "+pl.kConf+"個｜セット的中率 "+(pl.Pset*100).toFixed(0)+"%｜χ² p="+fmtP(o.p)+"。"+advice;
+    }
     $("distPred").innerHTML=planPockets();
   }
 
@@ -642,27 +657,34 @@
     if(o.np<1 || last==null){
       v.classList.add("v-wait");
       main.textContent="まず1回、出た目を記録";
-      sub.textContent="直前の目を基準に、次に張る14点と各数字の期待値を出す。";
+      sub.textContent="直前の目を基準に、期待値プラスの数字だけ出す。";
       $("betList").innerHTML='<div class="empty">記録待ち</div>';
       return;
     }
     var li=IDX[last];
-    var rows=pl.picks.map(function(d){
-      var p=WHEEL_ORDER[(li+d)%m];
-      var pi=o.np>0? o.counts[d]/o.np : 0;
-      return {p:p, d:d, pi:pi, ev:pi*pl.flatRet-1};   // net $ per $1 on this number
-    }).sort(function(x,y){ return y.pi-x.pi; });
+    var fallback = pl.k===0;
+    var src = fallback? pl.offRows.slice().sort(function(x,y){return y.p-x.p;}).slice(0,8) : pl.betSet;
+    var rows=src.map(function(r){ return {p:WHEEL_ORDER[(li+r.d)%m], d:r.d, pi:r.p, ev:r.evPoint, conf:r.evLow>0}; });
 
-    var cls = pl.evLow>1? "v-hit" : (pl.ev>1? "v-maybe" : "v-flat");
+    var cls = pl.profitLow>0? "v-hit" : (pl.k>0? "v-maybe" : "v-flat");
     v.classList.add(cls);
-    main.innerHTML="合計期待値 <b class='mono'>"+(pl.profit>=0?"+":"")+pl.profit.toFixed(2)+"</b>（14点$1ずつ・1スピン）"+(pl.profit>0?" ▲勝ち":" ▼負け");
-    sub.textContent="＝ $1あたり "+pl.ev.toFixed(2)+"（>1で勝ち）｜保守EV "+pl.evLow.toFixed(2)+"｜合計的中率 "+(pl.P*100).toFixed(0)+"%（損益分岐≈"+(pl.beP*100).toFixed(0)+"%）｜直前 "+last;
+    if(fallback){
+      main.innerHTML="+EVの数字がまだ無い — 最低額で探索";
+      sub.textContent="どの距離も損益分岐（的中率 "+(pl.beP1*100).toFixed(1)+"%）超えを確認できてない。ランク稼ぎは下の上位に最低額で。直前 "+last;
+    } else {
+      main.innerHTML="張る <b class='mono'>"+pl.k+"</b>個 ｜ 合計期待値 <b class='mono'>"+(pl.profitPoint>=0?"+":"")+pl.profitPoint.toFixed(2)+"</b>（$1ずつ・1スピン）";
+      sub.textContent="保守EV "+(pl.profitLow>=0?"+":"")+pl.profitLow.toFixed(2)+"（>0で本物）｜確定本命 "+pl.kConf+"個｜$1あたり "+pl.evPer.toFixed(2)+"｜合計的中率 "+(pl.Pset*100).toFixed(0)+"%｜直前 "+last;
+    }
 
     var h='<table><thead><tr><th>賭ける数字</th><th>距離</th><th>的中率</th><th>期待値/$1</th></tr></thead><tbody>';
     rows.forEach(function(r){
-      h+='<tr><td>'+badge(r.p)+'</td><td class="num">'+fmtOff(r.d)+'</td><td class="num">'+(r.pi*100).toFixed(1)+'%</td><td class="num '+(r.ev>=0?'ev-pos':'ev-neg')+'">'+(r.ev>=0?'+':'')+r.ev.toFixed(2)+'</td></tr>';
+      h+='<tr><td>'+badge(r.p)+(r.conf?' <span class="tag edge">本命</span>':'')+'</td><td class="num">'+fmtOff(r.d)+'</td><td class="num">'+(r.pi*100).toFixed(1)+'%</td><td class="num '+(r.ev>=0?'ev-pos':'ev-neg')+'">'+(r.ev>=0?'+':'')+r.ev.toFixed(2)+'</td></tr>';
     });
-    h+='</tbody><tfoot><tr style="border-top:2px solid var(--ink-faint)"><td><b>合計（14点）</b></td><td></td><td class="num">'+(pl.P*100).toFixed(0)+'%</td><td class="num '+(pl.profit>=0?'ev-pos':'ev-neg')+'"><b>'+(pl.profit>=0?'+':'')+pl.profit.toFixed(2)+'</b></td></tr></tfoot></table>';
+    h+='</tbody>';
+    if(!fallback){
+      h+='<tfoot><tr style="border-top:2px solid var(--ink-faint)"><td><b>合計（'+pl.k+'点）</b></td><td></td><td class="num">'+(pl.Pset*100).toFixed(0)+'%</td><td class="num '+(pl.profitPoint>=0?'ev-pos':'ev-neg')+'"><b>'+(pl.profitPoint>=0?'+':'')+pl.profitPoint.toFixed(2)+'</b></td></tr></tfoot>';
+    }
+    h+='</table>';
     $("betList").innerHTML=h;
   }
 
