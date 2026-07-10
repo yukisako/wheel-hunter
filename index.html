@@ -185,6 +185,7 @@
 <nav class="tabs">
   <button class="on" data-tab="log">記録</button>
   <button data-tab="stats">分析</button>
+  <button data-tab="dist">距離</button>
   <button data-tab="strat">作戦</button>
   <button data-tab="ev">EV</button>
   <button data-tab="data">データ</button>
@@ -205,6 +206,22 @@
   <div id="hotTable"></div>
   <h3 class="sec">セクター熱分布（物理配列順）</h3>
   <div class="sector" id="sectorBox"></div>
+</section>
+
+<section id="tab-dist">
+  <div class="verdict v-wait" id="distVerdict" style="margin:0 0 14px">
+    <div class="vlabel"><span class="dot"></span>距離の偏り</div>
+    <div class="vmain" id="dMain">データ待ち</div>
+    <div class="vsub" id="dSub"></div>
+  </div>
+  <div class="cards" id="distCards"></div>
+  <h3 class="sec">次に狙うゾーン（直前の目を基準に）</h3>
+  <div id="distPred"></div>
+  <h3 class="sec">オフセット分布（前の目から時計回り何個先か・平滑後）</h3>
+  <div class="sector" id="distHist"></div>
+  <div class="note-block" style="margin-top:14px">
+    横軸は「前の目から時計回りに何個先に落ちたか」。着地は物理的にばらつくから、<b>ピーク単体でなくガウス平滑で分散ごと確率場として</b>扱ってる（＝周辺も持ち上がる）。ただし ── これが効くのは<b>連続スピンが機械的に連動してる台だけ</b>。多くの自動機は毎回リセットされ前後の目は独立で、その場合この分布は平らになる。<b>平らなら独立＝この手は捨て、絶対位置の偏り（分析タブ）で戦う。</b>
+  </div>
 </section>
 
 <section id="tab-strat">
@@ -268,6 +285,7 @@
   var RED = {1:1,3:1,5:1,7:1,9:1,12:1,14:1,16:1,18:1,19:1,21:1,23:1,25:1,27:1,30:1,32:1,34:1,36:1};
   var WHEEL_ORDER = ["0","28","9","26","30","11","7","20","32","17","5","22","34","15","3","24","36","13","1","00","27","10","25","29","12","8","19","31","18","6","21","33","16","4","23","35","14","2"];
   var N_POCKETS = 38;
+  var IDX = {}; WHEEL_ORDER.forEach(function(p,i){ IDX[p]=i; });
   function colorOf(p){ if(p==="0"||p==="00") return "green"; return RED[+p]?"red":"black"; }
 
   // ---- Storage ----
@@ -538,6 +556,87 @@
       '<div class="note-block" style="margin-top:14px">'+(a.n<200?'<b>まだ母数が少ない（'+a.n+'）。</b>この的中率は当てにならない。数百スピン貯めてから判断を。':(ev>0?'<b>理論上プラス。</b>ただし信頼下限（分析タブ）が損益分岐を超えているか必ず確認してから賭けること。':'<b>まだマイナス。</b>この目の的中率が損益分岐を超えないと勝てない。'))+'</div>';
   }
 
+  // ---- Offset (distance-from-previous) analysis ----
+  // Circular Gaussian kernel over offsets so a hot distance lifts its neighbours too
+  // (physical landing has spread → model the whole probability field, not one bin).
+  function analyzeOffsets(s){
+    var m=N_POCKETS;
+    var counts=new Array(m); for(var d=0;d<m;d++) counts[d]=0;
+    var np=0;
+    for(var t=1;t<s.length;t++){
+      var ai=IDX[s[t-1]], bi=IDX[s[t]];
+      if(ai==null||bi==null) continue;
+      counts[((bi-ai)%m+m)%m]++; np++;
+    }
+    var E=np/m, chi2=0;
+    if(np>0){ for(var d2=0;d2<m;d2++){ chi2+=Math.pow(counts[d2]-E,2)/E; } }
+    var p=np>0? chiP(chi2,m-1) : 1;
+    // gaussian kernel, sigma=1, radius 3
+    var sigma=1.0, R=3, w=[];
+    for(var k=-R;k<=R;k++) w.push(Math.exp(-k*k/(2*sigma*sigma)));
+    var sw=0,sw2=0; w.forEach(function(x){sw+=x;sw2+=x*x;});
+    var sm=new Array(m);
+    for(var d3=0;d3<m;d3++){
+      var acc=0;
+      for(var k2=-R;k2<=R;k2++){ acc+=counts[((d3+k2)%m+m)%m]*w[k2+R]; }
+      sm[d3]=acc/sw; // smoothed count centred on offset d3
+    }
+    var sdRaw=np>0? Math.sqrt(np*(1/m)*(1-1/m)) : 0;
+    var sdSm=sdRaw*Math.sqrt(sw2)/sw;
+    var rows=[];
+    for(var d4=0;d4<m;d4++){ rows.push({d:d4,c:counts[d4],sm:sm[d4],z: sdSm>0?(sm[d4]-E)/sdSm:0}); }
+    var best=rows.slice().sort(function(x,y){return y.sm-x.sm;})[0];
+    return {np:np,counts:counts,sm:sm,E:E,chi2:chi2,p:p,rows:rows,best:best,sdSm:sdSm};
+  }
+
+  function renderDist(a){
+    var s=spins();
+    var o=analyzeOffsets(s);
+    $("distCards").innerHTML=
+      card("連続ペア数", o.np, o.np>=400?"十分な母数":(o.np>=150?"あと少し":"母数不足"))+
+      card("オフセットχ²", o.np?o.chi2.toFixed(1):"—", "df=37 / p="+(o.np?fmtP(o.p):"—"))+
+      card("最頻オフセット", o.np? (o.best.d+" 個先") : "—", o.np? "平滑後 Z=+"+o.best.z.toFixed(1) : "—")+
+      card("その距離の実測", o.np? o.best.c+"回" : "—", "期待 "+(o.np?o.E.toFixed(1):"0"));
+
+    var m=N_POCKETS, maxc=Math.max.apply(null,o.sm.concat([0.001]));
+    var hot={}; o.rows.forEach(function(r){ if(r.z>=2) hot[r.d]=1; });
+    var strip='<div class="wheelstrip">';
+    for(var d=0; d<m; d++){
+      var hh=Math.max(2, Math.round(o.sm[d]/maxc*40));
+      strip+='<div class="wcell'+(hot[d]?' hotarc':'')+'"><div class="wbar"><i style="height:'+hh+'px"></i></div><div class="wlab">'+d+'</div></div>';
+    }
+    strip+='</div>';
+    $("distHist").innerHTML=strip;
+
+    var v=$("distVerdict"), main=$("dMain"), sub=$("dSub");
+    v.className="verdict";
+    var last = s.length? s[s.length-1] : null;
+    if(o.np<150){
+      v.classList.add("v-wait");
+      main.textContent="まだ判断できない（ペア "+o.np+"/150+）";
+      sub.textContent="『前の目からの距離』に偏りがあるか見るには連続ペアが数百要る。記録を続けて。";
+      $("distPred").innerHTML='<div class="empty">データ待ち</div>';
+      return;
+    }
+    if(o.p<0.05){
+      v.classList.add(o.p<0.01?"v-hit":"v-maybe");
+      main.innerHTML="距離に偏りの兆候 → 最頻 <b class='mono'>"+o.best.d+"個先</b>";
+      sub.textContent="オフセットχ² p="+fmtP(o.p)+"。前の目を基準にこの距離帯を狙える可能性。ただし連続スピンが機械的に連動してる場合のみ本物。";
+      if(last!=null){
+        var li=IDX[last];
+        var picks=o.rows.slice().sort(function(x,y){return y.sm-x.sm;}).filter(function(r){return r.z>=1.5;}).slice(0,8);
+        if(!picks.length) picks=o.rows.slice().sort(function(x,y){return y.sm-x.sm;}).slice(0,5);
+        var chips=picks.map(function(r){ var p=WHEEL_ORDER[(li+r.d)%N_POCKETS]; return '<div class="chip c-'+colorOf(p)+'" title="'+r.d+'個先">'+p+'</div>'; }).join("");
+        $("distPred").innerHTML='<div class="note-block" style="margin-bottom:10px">直前の目 <b class="mono">'+last+'</b> を基準に、平滑後の距離分布が指す<b>次に狙うゾーン</b>（分散込み）：</div><div class="recent" style="flex-wrap:wrap;overflow:visible">'+chips+'</div>';
+      }
+      return;
+    }
+    v.classList.add("v-flat");
+    main.textContent="距離は一様 — 連続スピンは独立";
+    sub.textContent="オフセットχ² p="+fmtP(o.p)+"。前の目と次の目に関係なし＝この攻め方は無理。絶対位置の偏り（分析タブ）に集中を。";
+    $("distPred").innerHTML='<div class="empty">距離ベースの予測は無効（前後は独立）</div>';
+  }
+
   function renderWheelSel(){
     var names=Object.keys(db.wheels);
     wheelSel.innerHTML=names.map(function(nm){ return '<option'+(nm===db.current?' selected':'')+'>'+nm+'</option>'; }).join("");
@@ -552,6 +651,7 @@
     renderCards(a);
     renderHotTable(a);
     renderSector(a);
+    renderDist(a);
     renderStrat(a);
     renderEV(a);
   }
